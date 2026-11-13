@@ -1,0 +1,9 @@
+{
+  "name": "eduflow",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix front run dev",
+    "build": "npm --prefix front run build"
+  }
+}
+
