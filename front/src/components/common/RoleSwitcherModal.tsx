@@ -14,7 +14,8 @@ export const RoleSwitcherModal: React.FC<RoleSwitcherModalProps> = ({
   onSelectProfile,
   onClose,
 }) => {
-  const profiles = db.getProfiles();
+  const legacyDummyIds = ['stu-1', 'stu-2', 'stu-3', 'stu-4', 'par-1', 'par-2'];
+  const profiles = db.getProfiles().filter((p) => !legacyDummyIds.includes(p.id));
 
   const getRoleLabel = (role: string) => {
     switch (role) {

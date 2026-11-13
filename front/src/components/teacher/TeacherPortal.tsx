@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Profile, Session, Exam, Question } from '../../types/database';
 import { db } from '../../services/mockDatabase';
+import { sendN8nEvent } from '../../services/n8nService';
 
 interface TeacherPortalProps {
   currentTeacher: Profile;
@@ -33,9 +34,14 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
   const sessions = db.getSessions(selectedGroupId);
   const [selectedSessionId, setSelectedSessionId] = useState(sessions[0]?.id || 'sess-1');
 
-  // Enrolled students in this group
+  // Enrolled students in this group or under this teacher
   const enrollments = db.state.enrollments.filter((e) => e.group_id === selectedGroupId && e.status === 'active');
-  const studentProfiles = db.getStudents().filter((s) => enrollments.some((e) => e.student_id === s.id));
+  let studentProfiles = db.getStudents().filter((s) => 
+    enrollments.some((e) => e.student_id === s.id) || s.teacher_id === currentTeacher.id
+  );
+  if (studentProfiles.length === 0) {
+    studentProfiles = db.getStudents();
+  }
 
   // Homework grading desk
   const pendingSubmissions = db.state.submissions.filter((s) => s.status === 'submitted');
@@ -95,22 +101,60 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
 
   // Save Attendance Sheet
   const handleSaveAttendance = () => {
+    const session = sessions.find((s) => s.id === selectedSessionId) || sessions[0];
     const records = studentProfiles.map((s) => ({
-      session_id: selectedSessionId,
+      session_id: session?.id || selectedSessionId,
       student_id: s.id,
       status: attendanceStatuses[s.id] || 'present',
       recorded_by: currentTeacher.id,
     }));
 
     db.recordAttendance(records);
-    setAttendanceSuccessMsg('تم حفظ كشف الحضور والغياب بنجاح في قاعدة البيانات السحابية! ☁️');
-    setTimeout(() => setAttendanceSuccessMsg(''), 4000);
+
+    // Notify & dispatch real-time n8n event for absent students
+    records.forEach((r) => {
+      const st = studentProfiles.find((p) => p.id === r.student_id);
+      if (r.status === 'absent' && st) {
+        db.addNotification({
+          user_id: st.id,
+          title: '⚠️ تنبيه غياب عن الحصة',
+          message: `تم تسجيل غيابك عن ${session?.title || 'الحصة الدراسية'}. نرجو مراجعة المعلم أو مشاهدة التسجيل.`,
+          notification_type: 'attendance',
+        });
+        if (st.parent_id) {
+          db.addNotification({
+            user_id: st.parent_id,
+            title: `⚠️ تنبيه غياب الطالب ${st.full_name}`,
+            message: `نود إحاطتكم علماً بغياب نجلكم عن ${session?.title || 'الحصة'}.`,
+            notification_type: 'attendance',
+          });
+        }
+        sendN8nEvent('attendance_marked', {
+          student_id: st.id,
+          student_name: st.full_name,
+          session_title: session?.title,
+          status: 'absent',
+          date: new Date().toLocaleDateString('ar-EG'),
+        });
+      }
+    });
+
+    setAttendanceSuccessMsg(`تم بنجاح حفظ كشف الحضور والغياب لـ "${session?.title}" وتحديث بيانات أولياء الأمور فوراً! ☁️`);
+    setTimeout(() => setAttendanceSuccessMsg(''), 4500);
   };
 
   const handleMarkAllPresent = () => {
     const updated: Record<string, 'present'> = {};
     studentProfiles.forEach((s) => {
       updated[s.id] = 'present';
+    });
+    setAttendanceStatuses(updated);
+  };
+
+  const handleMarkAllAbsent = () => {
+    const updated: Record<string, 'absent'> = {};
+    studentProfiles.forEach((s) => {
+      updated[s.id] = 'absent';
     });
     setAttendanceStatuses(updated);
   };
@@ -883,88 +927,171 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
           <div className="bg-white border-2 border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-3 pb-3 border-b border-slate-100">
               <div>
-                <h3 className="text-lg font-black text-slate-900">
-                  📋 كشف الحضور والغياب للحصة
+                <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                  <span>📋 كشف الحضور والغياب للحصة</span>
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  تسجيل الحضور والغياب مع المزامنة الفورية مع أولياء الأمور
+                  حدد الحصة والطلاب الحاضرين والغائبين، وسيتم إخطار أولياء الأمور تلقائياً
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
+                  type="button"
                   onClick={handleMarkAllPresent}
-                  className="px-3.5 py-2 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 rounded-xl text-xs font-bold transition-colors"
+                  className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 rounded-xl text-xs font-bold transition-colors cursor-pointer"
                 >
-                  ✓ تحديد الكل حاضرين
+                  ✓ الكل حاضر
                 </button>
 
                 <button
+                  type="button"
+                  onClick={handleMarkAllAbsent}
+                  className="px-3 py-1.5 bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  ✗ الكل غائب
+                </button>
+
+                <button
+                  type="button"
                   onClick={handleSaveAttendance}
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
                 >
                   حفظ واعتماد الكشف ☁️
                 </button>
               </div>
             </div>
 
+            {/* Session & Group Picker */}
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  📌 اختر الحصة لرصد كشف الحضور:
+                </label>
+                <select
+                  value={selectedSessionId}
+                  onChange={(e) => {
+                    setSelectedSessionId(e.target.value);
+                    const existing = db.getAttendance(e.target.value);
+                    const map: Record<string, 'present' | 'absent' | 'late' | 'excused'> = {};
+                    existing.forEach((a) => {
+                      map[a.student_id] = a.status;
+                    });
+                    setAttendanceStatuses(map);
+                  }}
+                  className="w-full p-2.5 rounded-xl bg-white border border-slate-300 font-bold text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                >
+                  {sessions.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      الحصة {s.session_number}: {s.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  👥 المجموعة الدراسية:
+                </label>
+                <select
+                  value={selectedGroupId}
+                  onChange={(e) => {
+                    setSelectedGroupId(e.target.value);
+                    const groupSessions = db.getSessions(e.target.value);
+                    if (groupSessions.length > 0) {
+                      setSelectedSessionId(groupSessions[0].id);
+                    }
+                  }}
+                  className="w-full p-2.5 rounded-xl bg-white border border-slate-300 font-bold text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                >
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
             {attendanceSuccessMsg && (
-              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl">
+              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl animate-in fade-in">
                 {attendanceSuccessMsg}
               </div>
             )}
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-right text-xs">
-                <thead>
-                  <tr className="border-b border-slate-200 text-slate-500 font-bold">
-                    <th className="pb-3">الطالب</th>
-                    <th className="pb-3">الكود</th>
-                    <th className="pb-3 text-center">حاضر (Present)</th>
-                    <th className="pb-3 text-center">تأخير (Late)</th>
-                    <th className="pb-3 text-center">غائب (Absent)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {studentProfiles.map((s) => {
-                    const currentStatus = attendanceStatuses[s.id] || 'present';
-                    return (
-                      <tr key={s.id} className="hover:bg-slate-50/50">
-                        <td className="py-3.5 font-bold text-slate-900">{s.full_name}</td>
-                        <td className="py-3.5 text-slate-500">#{s.id}</td>
-                        <td className="py-3.5 text-center">
-                          <input
-                            type="radio"
-                            name={`att_${s.id}`}
-                            checked={currentStatus === 'present'}
-                            onChange={() => setAttendanceStatuses({ ...attendanceStatuses, [s.id]: 'present' })}
-                            className="w-4 h-4 text-emerald-600"
-                          />
-                        </td>
-                        <td className="py-3.5 text-center">
-                          <input
-                            type="radio"
-                            name={`att_${s.id}`}
-                            checked={currentStatus === 'late'}
-                            onChange={() => setAttendanceStatuses({ ...attendanceStatuses, [s.id]: 'late' })}
-                            className="w-4 h-4 text-amber-600"
-                          />
-                        </td>
-                        <td className="py-3.5 text-center">
-                          <input
-                            type="radio"
-                            name={`att_${s.id}`}
-                            checked={currentStatus === 'absent'}
-                            onChange={() => setAttendanceStatuses({ ...attendanceStatuses, [s.id]: 'absent' })}
-                            className="w-4 h-4 text-red-600"
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            {studentProfiles.length === 0 ? (
+              <div className="p-8 text-center text-slate-400 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+                <Users className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                <p className="text-sm font-bold text-slate-700">لا يوجد طلاب مقيدين في هذه المجموعة حالياً.</p>
+                <p className="text-xs text-slate-400 mt-1">عند تسجيل أي طالب جديد واختياره لمعلمك، سيظهر اسمه هنا فوراً.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-right text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-500 font-bold">
+                      <th className="pb-3 pr-2">الطالب</th>
+                      <th className="pb-3">الكود الأكاديمي</th>
+                      <th className="pb-3">الهاتف</th>
+                      <th className="pb-3 text-center">حاضر (Present) 🟢</th>
+                      <th className="pb-3 text-center">متأخر (Late) 🟡</th>
+                      <th className="pb-3 text-center">غائب (Absent) 🔴</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {studentProfiles.map((s) => {
+                      const currentStatus = attendanceStatuses[s.id] || 'present';
+                      return (
+                        <tr key={s.id} className="hover:bg-slate-50/70 transition-colors">
+                          <td className="py-3.5 pr-2 font-bold text-slate-900 flex items-center gap-2">
+                            <span className="text-lg">{s.avatar || '👨‍🎓'}</span>
+                            <span>{s.full_name}</span>
+                          </td>
+                          <td className="py-3.5 text-slate-500 font-mono">#{s.id}</td>
+                          <td className="py-3.5 text-slate-600 font-mono">{s.phone || '—'}</td>
+                          <td className="py-3.5 text-center">
+                            <label className="inline-flex items-center gap-1.5 cursor-pointer px-2.5 py-1 rounded-lg hover:bg-emerald-50">
+                              <input
+                                type="radio"
+                                name={`att_${s.id}`}
+                                checked={currentStatus === 'present'}
+                                onChange={() => setAttendanceStatuses({ ...attendanceStatuses, [s.id]: 'present' })}
+                                className="w-4 h-4 text-emerald-600 cursor-pointer"
+                              />
+                              <span className="text-emerald-700 font-bold">حاضر</span>
+                            </label>
+                          </td>
+                          <td className="py-3.5 text-center">
+                            <label className="inline-flex items-center gap-1.5 cursor-pointer px-2.5 py-1 rounded-lg hover:bg-amber-50">
+                              <input
+                                type="radio"
+                                name={`att_${s.id}`}
+                                checked={currentStatus === 'late'}
+                                onChange={() => setAttendanceStatuses({ ...attendanceStatuses, [s.id]: 'late' })}
+                                className="w-4 h-4 text-amber-600 cursor-pointer"
+                              />
+                              <span className="text-amber-700 font-bold">متأخر</span>
+                            </label>
+                          </td>
+                          <td className="py-3.5 text-center">
+                            <label className="inline-flex items-center gap-1.5 cursor-pointer px-2.5 py-1 rounded-lg hover:bg-rose-50">
+                              <input
+                                type="radio"
+                                name={`att_${s.id}`}
+                                checked={currentStatus === 'absent'}
+                                onChange={() => setAttendanceStatuses({ ...attendanceStatuses, [s.id]: 'absent' })}
+                                className="w-4 h-4 text-rose-600 cursor-pointer"
+                              />
+                              <span className="text-rose-700 font-bold">غائب</span>
+                            </label>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}

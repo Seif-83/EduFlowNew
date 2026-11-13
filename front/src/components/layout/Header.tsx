@@ -139,7 +139,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {/* Current Role Badge & Persona Switcher */}
-          {currentProfile.role === 'student' ? (
+          {['student', 'parent'].includes(currentProfile.role) ? (
             <div className={`flex items-center gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl border font-bold text-xs sm:text-sm ${badge.color}`}>
               <RoleIcon className="w-4 h-4 shrink-0" />
               <div className="text-right">
@@ -153,7 +153,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onOpenRoleModal}
               className={`flex items-center gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl border font-bold text-xs sm:text-sm cursor-pointer hover:shadow-xs transition-all ${badge.color}`}
-              title="اضغط لتبديل الدور (مساعد / معلم / ولي أمر / إدارة)"
+              title="اضغط لتبديل الدور (مساعد / معلم / إدارة)"
             >
               <RoleIcon className="w-4 h-4 shrink-0" />
               <div className="text-right">

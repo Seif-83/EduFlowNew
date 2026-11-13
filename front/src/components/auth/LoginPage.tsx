@@ -52,6 +52,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regGrade, setRegGrade] = useState('الصف الثاني الإعدادي');
+  const [regTeacherId, setRegTeacherId] = useState('tea-1');
   const [regGroupId, setRegGroupId] = useState('g-1');
   const [regSuccess, setRegSuccess] = useState('');
 
@@ -136,6 +137,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         password: pwd,
         grade_level: regGrade,
         group_id: regGroupId,
+        teacher_id: regTeacherId,
       });
 
       setIsLoading(false);
@@ -498,16 +500,19 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     required
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
-                    placeholder="مثال: tea-1 أو ahmed.radwan@eduflow.edu"
+                    placeholder="مثال: tea-1 أو admin@gmail.com أو teacher@gmail.com"
                     className="w-full pr-10 pl-4 py-2.5 rounded-xl bg-slate-950/80 border border-slate-700 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 font-mono"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  كلمة المرور
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-300">
+                    كلمة المرور
+                  </label>
+                  <span className="text-[11px] text-slate-400">مقبول: 123456 أو admin123</span>
+                </div>
                 <div className="relative">
                   <div className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-slate-400">
                     <Lock className="w-4 h-4" />
@@ -632,20 +637,54 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  المجموعة الدراسية المطلوب الانضمام لها
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  اختر المعلم والمادة التي ترغب بدراستها *
                 </label>
-                <select
-                  value={regGroupId}
-                  onChange={(e) => setRegGroupId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950/80 border border-slate-700 text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-                >
-                  {groups.map((g: CourseGroup) => (
-                    <option key={g.id} value={g.id}>
-                      {g.name} ({g.course_title || 'مادة علمية'})
-                    </option>
-                  ))}
-                </select>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRegTeacherId('tea-1');
+                      setRegGroupId('g-1');
+                    }}
+                    className={`p-3 rounded-2xl border text-right transition-all cursor-pointer flex items-center gap-3 ${
+                      regTeacherId === 'tea-1'
+                        ? 'bg-blue-950/70 border-blue-500 ring-2 ring-blue-500/30'
+                        : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-blue-600/20 text-blue-400 flex items-center justify-center text-xl shrink-0">
+                      👨‍🏫
+                    </div>
+                    <div>
+                      <div className="font-bold text-xs sm:text-sm text-white">أ. أحمد رضوان</div>
+                      <div className="text-[11px] text-blue-400">مادة العلوم والفيزياء</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">مجموعة الأوائل</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRegTeacherId('tea-2');
+                      setRegGroupId('g-2');
+                    }}
+                    className={`p-3 rounded-2xl border text-right transition-all cursor-pointer flex items-center gap-3 ${
+                      regTeacherId === 'tea-2'
+                        ? 'bg-purple-950/70 border-purple-500 ring-2 ring-purple-500/30'
+                        : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-purple-600/20 text-purple-400 flex items-center justify-center text-xl shrink-0">
+                      👩‍🏫
+                    </div>
+                    <div>
+                      <div className="font-bold text-xs sm:text-sm text-white">د. مروة محمود</div>
+                      <div className="text-[11px] text-purple-400">مادة الرياضيات والجبر</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">مجموعة المتفوقين</div>
+                    </div>
+                  </button>
+                </div>
               </div>
 
               <div>

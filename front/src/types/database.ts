@@ -8,6 +8,8 @@ export interface Profile {
   role: UserRole;
   avatar?: string;
   grade_level?: string;
+  teacher_id?: string;
+  teacher_name?: string;
   parent_id?: string;
   parent_name?: string;
   parent_email?: string;

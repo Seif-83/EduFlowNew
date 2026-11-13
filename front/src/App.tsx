@@ -132,14 +132,14 @@ export default function App() {
           <Home className="w-4 h-4" />
         </button>
 
-        {currentProfile.role !== 'student' && (
+        {['teacher', 'assistant', 'admin'].includes(currentProfile.role) && (
           <button
             onClick={() => setIsRoleModalOpen(true)}
             className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-slate-900 text-white text-xs font-bold shadow-xl shadow-slate-900/30 hover:bg-teal-600 hover:scale-105 transition-all duration-200 border border-slate-700/50 cursor-pointer"
             title="تبديل الحساب أو الصلاحية"
           >
             <ArrowLeftRight className="w-4 h-4 text-teal-400" />
-            <span>تبديل الصلاحية (مساعد / معلم / ولي أمر / إدارة)</span>
+            <span>تبديل الصلاحية (مساعد / معلم / إدارة)</span>
           </button>
         )}
 

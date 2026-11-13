@@ -20,10 +20,11 @@ import {
   Award,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { Profile, Session, Exam, Assignment, StudentPayment } from '../../types/database';
+import { Profile, Session, Exam, Assignment, StudentPayment, ExamAttempt } from '../../types/database';
 import { db } from '../../services/mockDatabase';
 import { generateLessonContent } from '../../services/aiGenerator';
 import { sounds } from '../../services/soundEffects';
+import { sendN8nEvent } from '../../services/n8nService';
 import { Flashcard3D } from '../common/Flashcard3D';
 import { ExamSolverModal } from '../common/ExamSolverModal';
 import { VideoPlayerModal } from '../common/VideoPlayerModal';
@@ -187,7 +188,60 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     setLessonQuizScore(score);
     setLessonQuizSubmitted(true);
 
-    const pct = Math.round((score / questions.length) * 100);
+    const total = questions.length || 1;
+    const pct = Math.round((score / total) * 100);
+    const passed = pct >= 70;
+
+    // Persist as ExamAttempt in the mockDatabase so parent and teacher portals reflect it immediately
+    const attemptId = 'att-quiz-' + Date.now();
+    const quizTitle = `كويز ذكي: ${generatedLesson.title}`;
+    
+    db.state.examAttempts.unshift({
+      id: attemptId,
+      exam_id: 'ex-ai-' + Date.now(),
+      student_id: currentStudent.id,
+      score,
+      total_score: total,
+      passed,
+      started_at: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
+      submitted_at: new Date().toISOString(),
+      exam_title: quizTitle,
+      subject: generatedLesson.subject || 'علوم وأحياء',
+    });
+
+    // Notify student in real-time
+    db.addNotification({
+      user_id: currentStudent.id,
+      title: passed ? '🎉 مبارك! اجتياز كويز الحصة الذكي' : '📝 نتيجة كويز الحصة الذكي',
+      message: `أتممت ${quizTitle} بنتيجة ${score}/${total} (${pct}%).`,
+      notification_type: 'exam',
+    });
+
+    // Add automation log for audit and reporting
+    db.addAutomationLog({
+      trigger_name: 'AI Quiz Completed -> Parent Report',
+      source: 'n8n',
+      payload_summary: `إرسال تقرير نتيجة الطالب ${currentStudent.full_name} (${score}/${total}) لبريد ولي الأمر`,
+      status: 'success',
+      target_email: currentStudent.parent_email || 'parent@eduflow.edu',
+    });
+
+    // Dispatch real-time webhook event to local n8n automation
+    sendN8nEvent('exam_submitted', {
+      student_name: currentStudent.full_name,
+      student_id: currentStudent.id,
+      exam_title: quizTitle,
+      parent_email: currentStudent.parent_email || 'parent@eduflow.edu',
+      parent_name: currentStudent.parent_name || 'ولي أمر الطالب',
+      earnedScore: score,
+      totalScore: total,
+      percentage: pct,
+      passingPercentage: 70,
+      passed,
+    });
+
+    db.persist();
+
     if (pct >= 70) {
       sounds.playFanfare();
       confetti({ particleCount: 100, spread: 80, origin: { y: 0.6 } });
@@ -274,6 +328,11 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               <p className="text-xs sm:text-sm text-slate-300 mt-2 flex items-center gap-3 flex-wrap">
                 <span className="font-bold text-white bg-white/10 px-2.5 py-0.5 rounded-lg border border-white/10">
                   {currentStudent.grade_level}
+                </span>
+                <span>•</span>
+                <span className="bg-blue-600/30 text-blue-200 border border-blue-500/40 px-3 py-0.5 rounded-lg font-bold text-xs flex items-center gap-1.5">
+                  <span>👨‍🏫 المعلم المشرف:</span>
+                  <strong className="text-white">{currentStudent.teacher_name || (currentStudent.teacher_id === 'tea-2' ? 'د. مروة محمود (رياضيات)' : 'أ. أحمد رضوان (علوم)')}</strong>
                 </span>
                 <span>•</span>
                 <span className="text-slate-300">

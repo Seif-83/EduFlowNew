@@ -34,69 +34,17 @@ const STORAGE_KEY = 'eduflow_db_v1';
 function getInitialData() {
   const profiles: Profile[] = [
     {
-      id: 'stu-1',
-      full_name: 'عمر حازم السيد',
-      email: 'omar.hazem@eduflow.edu',
-      phone: '01012345678',
-      role: 'student',
-      avatar: '👨‍🎓',
-      grade_level: 'الصف الثاني الإعدادي',
-      parent_id: 'par-1',
-      parent_name: 'أ. وليد حازم',
-      parent_email: 'walid.hazem@gmail.com',
-      created_at: '2026-09-01T10:00:00Z',
-    },
-    {
-      id: 'stu-2',
-      full_name: 'سلمى الشريف',
-      email: 'salma.elsharif@eduflow.edu',
-      phone: '01198765432',
-      role: 'student',
-      avatar: '👩‍🎓',
-      grade_level: 'الصف الثاني الإعدادي',
-      parent_id: 'par-1',
-      parent_name: 'أ. وليد حازم',
-      parent_email: 'walid.hazem@gmail.com',
-      created_at: '2026-09-01T10:00:00Z',
-    },
-    {
-      id: 'stu-3',
-      full_name: 'زياد طارق المنياوي',
-      email: 'ziad.tarek@eduflow.edu',
-      phone: '01234567890',
-      role: 'student',
-      avatar: '👨‍🎓',
-      grade_level: 'الصف الثالث الإعدادي',
-      parent_id: 'par-2',
-      parent_name: 'م. طارق المنياوي',
-      parent_email: 'tarek.elminyawi@gmail.com',
-      created_at: '2026-09-02T10:00:00Z',
-    },
-    {
-      id: 'stu-4',
-      full_name: 'جودي كريم الشناوي (Judy Karim)',
-      email: 'judy.karim@eduflow.edu',
-      phone: '01066778899',
-      role: 'student',
-      avatar: '👩‍🔬',
-      grade_level: 'Sec 1 - STEM & Languages (أولى ثانوي لغات)',
-      parent_id: 'par-1',
-      parent_name: 'د. كريم الشناوي',
-      parent_email: 'dr.karim.shennawy@gmail.com',
-      created_at: '2026-09-03T10:00:00Z',
-    },
-    {
       id: 'tea-1',
-      full_name: 'أ. أحمد رضوان',
+      full_name: 'أ. أحمد رضوان (معلم علوم وفيزياء)',
       email: 'ahmed.radwan@eduflow.edu',
-      phone: '01099887766',
+      phone: '01012345678',
       role: 'teacher',
       avatar: '👨‍🏫',
       created_at: '2026-08-15T09:00:00Z',
     },
     {
       id: 'tea-2',
-      full_name: 'د. مروة محمود',
+      full_name: 'د. مروة محمود (معلمة رياضيات وجبر)',
       email: 'marwa.mahmoud@eduflow.edu',
       phone: '01122334455',
       role: 'teacher',
@@ -104,26 +52,8 @@ function getInitialData() {
       created_at: '2026-08-20T09:00:00Z',
     },
     {
-      id: 'par-1',
-      full_name: 'أ. وليد حازم',
-      email: 'walid.hazem@gmail.com',
-      phone: '01055566677',
-      role: 'parent',
-      avatar: '👨‍💼',
-      created_at: '2026-09-01T11:00:00Z',
-    },
-    {
-      id: 'par-2',
-      full_name: 'م. طارق المنياوي',
-      email: 'tarek.elminyawi@gmail.com',
-      phone: '01077788899',
-      role: 'parent',
-      avatar: '👨‍💼',
-      created_at: '2026-09-02T11:00:00Z',
-    },
-    {
       id: 'ast-1',
-      full_name: 'أ. كريم نبيل (المساعد التعليمي والمنسق)',
+      full_name: 'أ. كريم نبيل (المساعد التعليمي والمنسق الأكاديمي)',
       email: 'karim.nabil@eduflow.edu',
       phone: '01044332211',
       role: 'assistant',
@@ -132,7 +62,7 @@ function getInitialData() {
     },
     {
       id: 'adm-1',
-      full_name: 'م. سيف عمرو (مدير المنظومة)',
+      full_name: 'م. سيف عمرو (مدير المنظومة الأكاديمية)',
       email: 'seifamrmohsen2005@gmail.com',
       phone: '01011122233',
       role: 'admin',
@@ -197,44 +127,7 @@ function getInitialData() {
     },
   ];
 
-  const enrollments: Enrollment[] = [
-    {
-      id: 'enr-1',
-      student_id: 'stu-1',
-      group_id: 'g-1',
-      enrolled_at: '2026-09-10T10:00:00Z',
-      status: 'active',
-      student_name: 'عمر حازم السيد',
-      group_name: 'مجموعة الأوائل - علوم 2 إعدادي',
-    },
-    {
-      id: 'enr-2',
-      student_id: 'stu-2',
-      group_id: 'g-1',
-      enrolled_at: '2026-09-11T10:00:00Z',
-      status: 'active',
-      student_name: 'سلمى الشريف',
-      group_name: 'مجموعة الأوائل - علوم 2 إعدادي',
-    },
-    {
-      id: 'enr-3',
-      student_id: 'stu-1',
-      group_id: 'g-2',
-      enrolled_at: '2026-09-10T10:00:00Z',
-      status: 'active',
-      student_name: 'عمر حازم السيد',
-      group_name: 'مجموعة العباقرة - رياضيات 2 إعدادي',
-    },
-    {
-      id: 'enr-4',
-      student_id: 'stu-4',
-      group_id: 'g-1',
-      enrolled_at: '2026-09-12T10:00:00Z',
-      status: 'active',
-      student_name: 'جودي كريم الشناوي (Judy Karim)',
-      group_name: 'مجموعة الأوائل - علوم 2 إعدادي',
-    },
-  ];
+  const enrollments: Enrollment[] = [];
 
   const sessions: Session[] = [
     {
@@ -273,19 +166,19 @@ function getInitialData() {
       is_published: true,
       created_at: '2026-09-30T10:00:00Z',
     },
-  ];
-
-  const videoPlays: VideoPlay[] = [
     {
-      id: 'vp-1',
-      session_id: 'sess-1',
-      student_id: 'stu-1',
-      started_at: '2026-09-21T18:00:00Z',
-      ended_at: '2026-09-21T18:45:00Z',
-      play_number: 1,
-      created_at: '2026-09-21T18:00:00Z',
+      id: 'sess-201',
+      group_id: 'g-2',
+      title: 'الحصة 1: التحليل الرياضي وحل المعادلات من الدرجة الثانية',
+      description: 'طرق التحليل الرياضي، القانون العام، والتطبيقات الهندسية.',
+      session_number: 1,
+      scheduled_at: '2026-09-22T16:00:00Z',
+      is_published: true,
+      created_at: '2026-09-16T10:00:00Z',
     },
   ];
+
+  const videoPlays: VideoPlay[] = [];
 
   const exams: Exam[] = [
     {
@@ -388,20 +281,7 @@ function getInitialData() {
     },
   ];
 
-  const examAttempts: ExamAttempt[] = [
-    {
-      id: 'att-1',
-      exam_id: 'ex-1',
-      student_id: 'stu-1',
-      score: 3,
-      total_score: 3,
-      passed: true,
-      started_at: '2026-09-22T14:00:00Z',
-      submitted_at: '2026-09-22T14:08:00Z',
-      exam_title: 'اختبار الحصة 1: التركيب الذري',
-      subject: 'علوم',
-    },
-  ];
+  const examAttempts: ExamAttempt[] = [];
 
   const assignments: Assignment[] = [
     {
@@ -432,71 +312,8 @@ function getInitialData() {
     },
   ];
 
-  const submissions: AssignmentSubmission[] = [
-    {
-      id: 'sub-1',
-      assignment_id: 'asg-2',
-      student_id: 'stu-1',
-      submission_text: 'التوزيع الإلكتروني: Na (2,8,1) - O (2,6) - Cl (2,8,7) - Mg (2,8,2) - Ne (2,8). جميع المستويات موزعة حسب قواعد الطاقة.',
-      file_url: 'https://example.com/homework-omar.pdf',
-      score: 15,
-      teacher_feedback: 'إجابة نموذجية ومنظمة جداً يا عمر، أحسنت وبارك الله فيك!',
-      status: 'graded',
-      submitted_at: '2026-09-21T16:00:00Z',
-      graded_at: '2026-09-22T09:30:00Z',
-      graded_by: 'tea-1',
-      student_name: 'عمر حازم السيد',
-      assignment_title: 'واجب التركيب الذري: التوزيع الإلكتروني',
-      max_score: 15,
-    },
-  ];
-
-  const attendance: Attendance[] = [
-    {
-      id: 'att-101',
-      session_id: 'sess-1',
-      student_id: 'stu-1',
-      status: 'present',
-      recorded_by: 'tea-1',
-      recorded_at: '2026-09-20T17:15:00Z',
-      session_title: 'الحصة 1: مدخل إلى التركيب الذري',
-      session_number: 1,
-      student_name: 'عمر حازم السيد',
-    },
-    {
-      id: 'att-102',
-      session_id: 'sess-1',
-      student_id: 'stu-2',
-      status: 'present',
-      recorded_by: 'tea-1',
-      recorded_at: '2026-09-20T17:15:00Z',
-      session_title: 'الحصة 1: مدخل إلى التركيب الذري',
-      session_number: 1,
-      student_name: 'سلمى الشريف',
-    },
-    {
-      id: 'att-103',
-      session_id: 'sess-2',
-      student_id: 'stu-1',
-      status: 'present',
-      recorded_by: 'tea-1',
-      recorded_at: '2026-09-27T17:10:00Z',
-      session_title: 'الحصة 2: الجهاز الدوري ووظائف القلب',
-      session_number: 2,
-      student_name: 'عمر حازم السيد',
-    },
-    {
-      id: 'att-104',
-      session_id: 'sess-2',
-      student_id: 'stu-2',
-      status: 'late',
-      recorded_by: 'tea-1',
-      recorded_at: '2026-09-27T17:25:00Z',
-      session_title: 'الحصة 2: الجهاز الدوري ووظائف القلب',
-      session_number: 2,
-      student_name: 'سلمى الشريف',
-    },
-  ];
+  const submissions: AssignmentSubmission[] = [];
+  const attendance: Attendance[] = [];
 
   const billingSettings: GroupBillingSettings[] = [
     {
@@ -517,110 +334,8 @@ function getInitialData() {
     },
   ];
 
-  const studentPayments: StudentPayment[] = [
-    {
-      id: 'inv-1',
-      student_id: 'stu-1',
-      group_id: 'g-1',
-      amount: 450,
-      currency: 'EGP',
-      period_label: 'اشتراك شهر سبتمبر 2026',
-      due_date: '2026-09-10',
-      status: 'paid',
-      payment_method: 'instapay',
-      paid_at: '2026-09-08T14:20:00Z',
-      recorded_by: 'adm-1',
-      notes: 'تم التحويل عبر تطبيق إنستاباي واستلام إشعار البنك',
-      created_at: '2026-09-01T10:00:00Z',
-      paid_amount: 450,
-      remaining_amount: 0,
-      student_name: 'عمر حازم السيد',
-      group_name: 'مجموعة الأوائل - علوم 2 إعدادي',
-    },
-    {
-      id: 'inv-2',
-      student_id: 'stu-1',
-      group_id: 'g-1',
-      amount: 450,
-      currency: 'EGP',
-      period_label: 'اشتراك شهر أكتوبر 2026',
-      due_date: '2026-10-10',
-      status: 'paid',
-      payment_method: 'vodafone_cash',
-      paid_at: '2026-10-09T18:15:00Z',
-      recorded_by: 'adm-1',
-      notes: 'فودافون كاش - كود الإيصال #99824',
-      created_at: '2026-10-01T10:00:00Z',
-      paid_amount: 450,
-      remaining_amount: 0,
-      student_name: 'عمر حازم السيد',
-      group_name: 'مجموعة الأوائل - علوم 2 إعدادي',
-    },
-    {
-      id: 'inv-3',
-      student_id: 'stu-1',
-      group_id: 'g-1',
-      amount: 450,
-      currency: 'EGP',
-      period_label: 'اشتراك شهر نوفمبر 2026',
-      due_date: '2026-11-10',
-      status: 'partially_paid',
-      payment_method: 'instapay',
-      created_at: '2026-11-01T10:00:00Z',
-      paid_amount: 250,
-      remaining_amount: 200,
-      student_name: 'عمر حازم السيد',
-      group_name: 'مجموعة الأوائل - علوم 2 إعدادي',
-    },
-    {
-      id: 'inv-4',
-      student_id: 'stu-2',
-      group_id: 'g-1',
-      amount: 450,
-      currency: 'EGP',
-      period_label: 'اشتراك شهر أكتوبر 2026',
-      due_date: '2026-10-05',
-      status: 'overdue',
-      created_at: '2026-10-01T10:00:00Z',
-      paid_amount: 0,
-      remaining_amount: 450,
-      student_name: 'سلمى الشريف',
-      group_name: 'مجموعة الأوائل - علوم 2 إعدادي',
-    },
-  ];
-
-  const paymentTransactions: PaymentTransaction[] = [
-    {
-      id: 'pt-1',
-      student_payment_id: 'inv-1',
-      amount: 450,
-      payment_method: 'instapay',
-      paid_at: '2026-09-08T14:20:00Z',
-      recorded_by: 'adm-1',
-      notes: 'سداد كامل',
-      created_at: '2026-09-08T14:20:00Z',
-    },
-    {
-      id: 'pt-2',
-      student_payment_id: 'inv-2',
-      amount: 450,
-      payment_method: 'vodafone_cash',
-      paid_at: '2026-10-09T18:15:00Z',
-      recorded_by: 'adm-1',
-      notes: 'سداد كامل',
-      created_at: '2026-10-09T18:15:00Z',
-    },
-    {
-      id: 'pt-3',
-      student_payment_id: 'inv-3',
-      amount: 250,
-      payment_method: 'instapay',
-      paid_at: '2026-11-05T12:00:00Z',
-      recorded_by: 'adm-1',
-      notes: 'دفعة أولى 250 جنيه والمتبقي 200 جنيه',
-      created_at: '2026-11-05T12:00:00Z',
-    },
-  ];
+  const studentPayments: StudentPayment[] = [];
+  const paymentTransactions: PaymentTransaction[] = [];
 
   const teacherComp: TeacherCompensation[] = [
     {
@@ -689,200 +404,15 @@ function getInitialData() {
     },
   ];
 
-  const parentLinks: ParentStudentLink[] = [
-    {
-      id: 'psl-1',
-      parent_id: 'par-1',
-      student_id: 'stu-1',
-      status: 'approved',
-      created_at: '2026-09-01T10:00:00Z',
-    },
-    {
-      id: 'psl-2',
-      parent_id: 'par-1',
-      student_id: 'stu-2',
-      status: 'approved',
-      created_at: '2026-09-01T10:00:00Z',
-    },
-    {
-      id: 'psl-3',
-      parent_id: 'par-2',
-      student_id: 'stu-3',
-      status: 'approved',
-      created_at: '2026-09-02T10:00:00Z',
-    },
-  ];
+  const parentLinks: ParentStudentLink[] = [];
 
-  const complaints: Complaint[] = [
-    {
-      id: 'comp-1',
-      submitted_by: 'par-1',
-      subject: 'طلب توفير تسجيل مراجعة الجهاز الدوري بصيغة خفيفة',
-      description: 'نرجو من الإدارة توفير نسخة خفيفة التحميل من فيديو الحصة لضعف الإنترنت المنزلي أحياناً.',
-      category: 'تقنية وفيديو',
-      priority: 'normal',
-      status: 'resolved',
-      assigned_to: 'adm-1',
-      admin_response: 'تم بحمد الله رفع جودة متعددة (360p و 720p) عبر مشغل الفيديو السحابي لتيسير المذاكرة.',
-      created_at: '2026-09-28T11:00:00Z',
-      resolved_at: '2026-09-29T15:00:00Z',
-      submitter_name: 'أ. وليد حازم (ولي أمر)',
-      submitter_role: 'parent',
-      assigned_name: 'م. سيف عمرو',
-    },
-    {
-      id: 'comp-2',
-      submitted_by: 'stu-1',
-      subject: 'استفسار عن موعد الاختبار التجريبي الشهري',
-      description: 'هل اختبار نهاية الوحدة الأولى سيشمل الحصة الثالثة الخاصة بالجهاز التنفسي؟',
-      category: 'أكاديمي وامتحانات',
-      priority: 'low',
-      status: 'open',
-      created_at: '2026-10-05T14:30:00Z',
-      submitter_name: 'عمر حازم السيد (طالب)',
-      submitter_role: 'student',
-    },
-  ];
-
-  const notifications: AppNotification[] = [
-    {
-      id: 'notif-1',
-      user_id: 'stu-1',
-      title: '🎉 تهانينا! تفوق في الاختبار',
-      message: 'لقد حصلت على الدرجة النهائية (3/3) في اختبار التركيب الذري.',
-      notification_type: 'exam',
-      is_read: false,
-      related_url: '/exams/ex-1',
-      created_at: '2026-09-22T14:09:00Z',
-    },
-    {
-      id: 'notif-2',
-      user_id: 'stu-1',
-      title: '📋 تم نشر الحصة الثانية',
-      message: 'قام أ. أحمد رضوان بنشر حصة الجهاز الدوري ومرفقات الشرح.',
-      notification_type: 'session',
-      is_read: true,
-      related_url: '/sessions/sess-2',
-      created_at: '2026-09-25T11:00:00Z',
-    },
-    {
-      id: 'notif-3',
-      user_id: 'par-1',
-      title: '✉️ تقرير تفوق ابنكم عمر حازم',
-      message: 'أتم عمر الحصة واختبار العلوم بنسبة 100% وحضوره منتظم بنسبة 100%.',
-      notification_type: 'exam',
-      is_read: false,
-      created_at: '2026-09-22T14:10:00Z',
-    },
-  ];
-
-  const courseMaterials: CourseMaterial[] = [
-    {
-      id: 'mat-1',
-      course_id: 'c-1',
-      session_id: 'sess-1',
-      title: 'مذكرة التركيب الذري وقوانين بور للمستويات',
-      description: 'ملف PDF يحتوي على الجداول والرسومات التوضيحية لمدارات الطاقة.',
-      file_url: 'https://storage.eduflow.edu/materials/atomic-structure.pdf',
-      file_type: 'pdf',
-      uploaded_by: 'tea-1',
-      created_at: '2026-09-16T10:00:00Z',
-      rag_status: 'completed',
-      rag_chunk_count: 14,
-      rag_processed_at: '2026-09-16T10:02:00Z',
-    },
-    {
-      id: 'mat-2',
-      course_id: 'c-1',
-      session_id: 'sess-2',
-      title: 'أطلس الجهاز الدوري وصمامات القلب بالصور الملونة',
-      description: 'دليل مرئي توضيحي لضغط الدم ومسار الدورة الدموية الكبرى والصغرى.',
-      file_url: 'https://storage.eduflow.edu/materials/circulatory-atlas.pdf',
-      file_type: 'pdf',
-      uploaded_by: 'tea-1',
-      created_at: '2026-09-23T10:00:00Z',
-      rag_status: 'completed',
-      rag_chunk_count: 22,
-      rag_processed_at: '2026-09-23T10:03:00Z',
-    },
-  ];
-
-  const studentNotes: StudentNote[] = [
-    {
-      id: 'sn-1',
-      student_id: 'stu-1',
-      teacher_id: 'tea-1',
-      group_id: 'g-1',
-      note: 'عمر طالب ذكي ومتفاعل ومستواه متميز في استيعاب المفاهيم المجردة والتوزيع الإلكتروني.',
-      created_at: '2026-09-23T12:00:00Z',
-      teacher_name: 'أ. أحمد رضوان',
-      student_name: 'عمر حازم السيد',
-    },
-  ];
-
-  const aiConversations: AiConversation[] = [
-    {
-      id: 'conv-1',
-      user_id: 'stu-1',
-      group_id: 'g-1',
-      title: 'استفسار عن الشرايين والأوردة',
-      created_at: '2026-09-27T18:00:00Z',
-      updated_at: '2026-09-27T18:05:00Z',
-    },
-  ];
-
-  const aiMessages: AiMessage[] = [
-    {
-      id: 'msg-1',
-      conversation_id: 'conv-1',
-      sender: 'user',
-      message: 'ما هو الشريان الوحيد في جسم الإنسان الذي يحمل دماً غير مؤكسج؟',
-      created_at: '2026-09-27T18:01:00Z',
-    },
-    {
-      id: 'msg-2',
-      conversation_id: 'conv-1',
-      sender: 'assistant',
-      message: 'سؤال ممتاز يا عمر! الشريان الوحيد الذي يحمل دماً غير مؤكسج (محمل بثاني أكسيد الكربون) هو الشريان الرئوي (Pulmonary Artery)، حيث ينقل الدم من البطين الأيمن للقلب إلى الرئتين ليتزود بالأكسجين.',
-      created_at: '2026-09-27T18:01:30Z',
-    },
-  ];
-
-  const automationLogs: AutomationLog[] = [
-    {
-      id: 'aut-1',
-      trigger_name: 'WebHook: Quiz Passed -> Gmail Parent Alert',
-      source: 'n8n',
-      payload_summary: 'إرسال شهادة وتقرير الطالب عمر حازم لبريد ولي الأمر walid.hazem@gmail.com',
-      status: 'success',
-      timestamp: '2026-09-22T14:09:15Z',
-      target_email: 'walid.hazem@gmail.com',
-    },
-    {
-      id: 'aut-2',
-      trigger_name: 'Sync: Student Exam Score -> Google Sheets',
-      source: 'n8n',
-      payload_summary: 'إضافة صف الدرجات في شيت الكنترول المركزي للمرحلة الإعدادية',
-      status: 'success',
-      timestamp: '2026-09-22T14:09:20Z',
-    },
-    {
-      id: 'aut-3',
-      trigger_name: 'RAG Pipeline: Ingest Course Materials',
-      source: 'gemini',
-      payload_summary: 'تحليل ملف atomic-structure.pdf وتوليد 14 متجه RAG للذكاء الاصطناعي',
-      status: 'success',
-      timestamp: '2026-09-16T10:02:15Z',
-    },
-    {
-      id: 'aut-4',
-      trigger_name: 'Financial: Overdue Invoice Reminder',
-      source: 'n8n',
-      payload_summary: 'إرسال إشعار استحقاق اشتراك شهر أكتوبر للمتأخرات',
-      status: 'success',
-      timestamp: '2026-10-11T09:00:00Z',
-    },
-  ];
+  const complaints: Complaint[] = [];
+  const notifications: AppNotification[] = [];
+  const courseMaterials: CourseMaterial[] = [];
+  const studentNotes: StudentNote[] = [];
+  const aiConversations: AiConversation[] = [];
+  const aiMessages: AiMessage[] = [];
+  const automationLogs: AutomationLog[] = [];
 
   return {
     profiles,
@@ -909,7 +439,7 @@ function getInitialData() {
     aiConversations,
     aiMessages,
     automationLogs,
-    currentUserId: 'stu-1', // Default viewing persona: Student
+    currentUserId: 'adm-1',
   };
 }
 
@@ -946,6 +476,47 @@ class MockDatabaseService {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored) {
           const parsed = JSON.parse(stored);
+          const legacyDummyIds = ['stu-1', 'stu-2', 'stu-3', 'stu-4', 'par-1', 'par-2'];
+
+          if (Array.isArray(parsed.profiles)) {
+            parsed.profiles = parsed.profiles.filter((p: any) => !legacyDummyIds.includes(p.id));
+            const staff = getInitialData().profiles;
+            staff.forEach((s) => {
+              if (!parsed.profiles.some((p: any) => p.id === s.id)) {
+                parsed.profiles.push(s);
+              }
+            });
+          }
+
+          if (Array.isArray(parsed.examAttempts)) {
+            parsed.examAttempts = parsed.examAttempts.filter((a: any) => !legacyDummyIds.includes(a.student_id));
+          }
+          if (Array.isArray(parsed.attendance)) {
+            parsed.attendance = parsed.attendance.filter((a: any) => !legacyDummyIds.includes(a.student_id));
+          }
+          if (Array.isArray(parsed.videoPlays)) {
+            parsed.videoPlays = parsed.videoPlays.filter((v: any) => !legacyDummyIds.includes(v.student_id));
+          }
+          if (Array.isArray(parsed.submissions)) {
+            parsed.submissions = parsed.submissions.filter((s: any) => !legacyDummyIds.includes(s.student_id));
+          }
+          if (Array.isArray(parsed.enrollments)) {
+            parsed.enrollments = parsed.enrollments.filter((e: any) => !legacyDummyIds.includes(e.student_id));
+          }
+          if (Array.isArray(parsed.parentLinks)) {
+            parsed.parentLinks = parsed.parentLinks.filter(
+              (l: any) => !legacyDummyIds.includes(l.student_id) && !legacyDummyIds.includes(l.parent_id)
+            );
+          }
+          if (Array.isArray(parsed.studentPayments)) {
+            parsed.studentPayments = parsed.studentPayments.filter((p: any) => !legacyDummyIds.includes(p.student_id));
+          }
+
+          if (legacyDummyIds.includes(parsed.currentUserId)) {
+            const firstStudent = parsed.profiles.find((p: any) => p.role === 'student');
+            parsed.currentUserId = firstStudent ? firstStudent.id : 'adm-1';
+          }
+
           return parsed;
         }
       } catch (e) {
@@ -1008,21 +579,46 @@ class MockDatabaseService {
   }
 
   login(identifier: string, password?: string): { success: boolean; profile?: Profile; error?: string } {
-    const cleanId = identifier.trim().toLowerCase();
-    const profile = this.state.profiles.find(
-      (p) =>
-        p.email.toLowerCase() === cleanId ||
-        p.id.toLowerCase() === cleanId ||
-        (p.phone && p.phone.trim() === cleanId) ||
-        p.full_name.toLowerCase().includes(cleanId)
-    );
-    if (!profile) {
-      return { success: false, error: 'لم يتم العثور على حساب مطابق للبيانات المدخلة. يرجى التأكد من رقم الهاتف أو الكود أو البريد.' };
+    const cleanId = (identifier || '').trim().toLowerCase();
+    
+    // Smart demo aliases mapping for smooth access
+    let profile: Profile | undefined;
+    if (['admin', 'admin@gmail.com', 'admin@eduflow.edu', 'adm-1', 'seif'].includes(cleanId)) {
+      profile = this.state.profiles.find((p) => p.role === 'admin') || this.state.profiles.find((p) => p.id === 'adm-1');
+    } else if (['teacher', 'teacher@gmail.com', 'teacher@eduflow.edu', 'tea-1', 'ahmed'].includes(cleanId)) {
+      profile = this.state.profiles.find((p) => p.id === 'tea-1') || this.state.profiles.find((p) => p.role === 'teacher');
+    } else if (['tea-2', 'marwa', 'teacher2'].includes(cleanId)) {
+      profile = this.state.profiles.find((p) => p.id === 'tea-2');
+    } else if (['assistant', 'assistant@gmail.com', 'ast-1', 'karim'].includes(cleanId)) {
+      profile = this.state.profiles.find((p) => p.id === 'ast-1') || this.state.profiles.find((p) => p.role === 'assistant');
+    } else if (['parent', 'parent@gmail.com', 'par-1', 'walid'].includes(cleanId)) {
+      profile = this.state.profiles.find((p) => p.id === 'par-1') || this.state.profiles.find((p) => p.role === 'parent');
+    } else if (['student', 'stu-1', 'omar'].includes(cleanId)) {
+      profile = this.state.profiles.find((p) => p.id === 'stu-1') || this.state.profiles.find((p) => p.role === 'student');
     }
 
-    // If profile has a set password and a password was passed, verify or allow universal demo password '123456'
-    if (password && profile.password && profile.password !== password && password !== '123456') {
-      return { success: false, error: 'كلمة المرور غير صحيحة. يرجى التأكد من كلمة المرور أو استخدام 123456.' };
+    if (!profile) {
+      profile = this.state.profiles.find(
+        (p) =>
+          p.email.toLowerCase() === cleanId ||
+          p.id.toLowerCase() === cleanId ||
+          (p.phone && p.phone.trim() === cleanId) ||
+          p.full_name.toLowerCase().includes(cleanId)
+      );
+    }
+
+    if (!profile) {
+      return { success: false, error: 'لم يتم العثور على حساب مطابق للبيانات المدخلة. يمكنك استخدام كود المعلم tea-1 أو admin@gmail.com أو teacher@gmail.com.' };
+    }
+
+    // Friendly demo password verification: allow profile password, universal 123456, admin123, or teacher123
+    const acceptablePasswords = ['123456', 'admin123', 'teacher123', 'admin', 'teacher'];
+    if (profile.password) {
+      acceptablePasswords.push(profile.password);
+    }
+
+    if (password && profile.password && !acceptablePasswords.includes(password.trim())) {
+      return { success: false, error: 'كلمة المرور غير صحيحة. يمكنك الدخول بـ 123456 أو admin123.' };
     }
 
     this.state.currentUserId = profile.id;
@@ -1118,9 +714,19 @@ class MockDatabaseService {
     password?: string;
     grade_level: string;
     group_id?: string;
+    teacher_id?: string;
   }): Profile {
     const newId = 'stu-' + Math.floor(100000 + Math.random() * 900000);
     const email = data.email?.trim() || `stu.${data.phone.trim().slice(-4) || 'user'}@eduflow.edu`;
+    
+    const teacherId = data.teacher_id || (data.group_id === 'g-2' ? 'tea-2' : 'tea-1');
+    const teacher = this.state.profiles.find((p) => p.id === teacherId);
+    let groupId = data.group_id;
+    if (!groupId) {
+      const teacherGroup = this.state.groups.find((g) => g.teacher_id === teacherId);
+      groupId = teacherGroup?.id || 'g-1';
+    }
+
     const student: Profile = {
       id: newId,
       full_name: data.full_name.trim(),
@@ -1130,17 +736,19 @@ class MockDatabaseService {
       grade_level: data.grade_level,
       role: 'student',
       avatar: '👨‍🎓',
+      teacher_id: teacherId,
+      teacher_name: teacher?.full_name || 'أ. أحمد رضوان',
       created_at: new Date().toISOString(),
     };
 
     this.state.profiles.push(student);
 
-    if (data.group_id) {
-      const group = this.state.groups.find((g) => g.id === data.group_id);
+    if (groupId) {
+      const group = this.state.groups.find((g) => g.id === groupId);
       this.state.enrollments.push({
         id: 'enr-' + Date.now(),
         student_id: newId,
-        group_id: data.group_id,
+        group_id: groupId,
         enrolled_at: new Date().toISOString(),
         status: 'active',
         student_name: student.full_name,

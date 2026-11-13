@@ -232,3 +232,4 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin }) =
     </div>
   );
 };
+
