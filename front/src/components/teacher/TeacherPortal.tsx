@@ -111,9 +111,10 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
 
     db.recordAttendance(records);
 
-    // Notify & dispatch real-time n8n event for absent students
-    records.forEach((r) => {
+    // Notify students & parents and dispatch a SINGLE n8n event with all records
+    const allRecordsForN8n = records.map((r) => {
       const st = studentProfiles.find((p) => p.id === r.student_id);
+      // In-app notifications
       if (r.status === 'absent' && st) {
         db.addNotification({
           user_id: st.id,
@@ -129,14 +130,27 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
             notification_type: 'attendance',
           });
         }
-        sendN8nEvent('attendance_marked', {
-          student_id: st.id,
-          student_name: st.full_name,
-          session_title: session?.title,
-          status: 'absent',
-          date: new Date().toLocaleDateString('ar-EG'),
-        });
       }
+      return {
+        student_id: st?.id || r.student_id,
+        student_name: st?.full_name || 'طالب',
+        parent_email: st?.parent_email || 'parent@eduflow.edu',
+        parent_phone: st?.phone || 'غير متاح',
+        status: r.status,
+        consecutive_absences: 1,
+      };
+    });
+
+    const currentGroup = groups.find((g) => g.id === selectedGroupId) || groups[0];
+
+    // Single n8n webhook dispatch for the whole sheet
+    sendN8nEvent('attendance_marked', {
+      teacher_name: currentTeacher.full_name,
+      teacher_id: currentTeacher.id,
+      session_title: session?.title || 'الحصة الدراسية',
+      group_name: currentGroup?.name || 'المجموعة الدراسية',
+      date: new Date().toLocaleDateString('ar-EG'),
+      records: allRecordsForN8n,
     });
 
     setAttendanceSuccessMsg(`تم بنجاح حفظ كشف الحضور والغياب لـ "${session?.title}" وتحديث بيانات أولياء الأمور فوراً! ☁️`);

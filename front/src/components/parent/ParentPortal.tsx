@@ -44,14 +44,20 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ currentParent }) => 
   ];
 
   let children = db.getStudents().filter((s) => linkedStudentIds.includes(s.id));
-  if (children.length === 0) {
-    children = db.getStudents();
+
+  // If newly created parent ID was derived from a student ID
+  if (children.length === 0 && currentParent.id.startsWith('par-')) {
+    const inferredStudentId = currentParent.id.replace('par-', 'stu-');
+    const matched = db.getStudents().find((s) => s.id === inferredStudentId);
+    if (matched) {
+      children = [matched];
+    }
   }
 
-  const [selectedChildId, setSelectedChildId] = useState(children[0]?.id || 'stu-1');
+  const [selectedChildId, setSelectedChildId] = useState(children[0]?.id || '');
 
   useEffect(() => {
-    if (children.length > 0 && !children.some((c) => c.id === selectedChildId)) {
+    if (children.length > 0 && (!selectedChildId || !children.some((c) => c.id === selectedChildId))) {
       setSelectedChildId(children[0].id);
     }
   }, [children, selectedChildId]);
@@ -153,8 +159,44 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ currentParent }) => 
 
   if (!activeChild) {
     return (
-      <div className="max-w-7xl mx-auto p-8 text-center text-slate-500">
-        لا يوجد أبناء مرتبطين بهذا الحساب حالياً.
+      <div className="max-w-xl mx-auto px-4 py-16 text-center space-y-6" dir="rtl">
+        <div className="w-20 h-20 rounded-3xl bg-amber-50 text-amber-600 border-2 border-amber-200 flex items-center justify-center text-4xl mx-auto shadow-md">
+          👨‍👩‍👧‍👦
+        </div>
+        <div className="space-y-2">
+          <h3 className="text-xl font-black text-slate-900">
+            مرحباً بك يا {currentParent.full_name} في بوابة أولياء الأمور
+          </h3>
+          <p className="text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
+            لم يتم ربط حساب ابنك بعد. أدخل رقم هاتف الطالب المسجل في المنصة أو كوده لمتابعة درجاته وحضوره فوراً:
+          </p>
+        </div>
+        <form onSubmit={handleLinkStudent} className="bg-white border-2 border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-4 text-right">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              رقم هاتف الطالب أو الكود الأكاديمي:
+            </label>
+            <input
+              type="text"
+              required
+              value={linkQuery}
+              onChange={(e) => setLinkQuery(e.target.value)}
+              placeholder="مثال: 010XXXXXXXX"
+              className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
+            />
+          </div>
+          {linkMsg && (
+            <div className={`p-3 rounded-xl text-xs font-bold ${linkMsg.isError ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+              {linkMsg.text}
+            </div>
+          )}
+          <button
+            type="submit"
+            className="w-full py-3.5 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white rounded-xl text-sm font-bold shadow-md shadow-amber-600/20 transition-all cursor-pointer"
+          >
+            ربط حساب الطالب ومتابعة نتائجه ➔
+          </button>
+        </form>
       </div>
     );
   }

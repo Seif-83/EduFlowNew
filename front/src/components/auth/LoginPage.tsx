@@ -56,6 +56,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [regGroupId, setRegGroupId] = useState('g-1');
   const [regSuccess, setRegSuccess] = useState('');
 
+  const registeredStudents = db.getStudents();
+  const latestStudent = registeredStudents[registeredStudents.length - 1];
+
   const groups = db.getGroups();
 
   // Reset errors when changing tabs
@@ -330,16 +333,26 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
               {/* Quick sample student fill */}
               <div className="pt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 border-t border-slate-800/80 pt-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIdentifier('01012345678');
-                    setPassword('123456');
-                  }}
-                  className="text-blue-400 hover:text-blue-300 underline underline-offset-4 cursor-pointer"
-                >
-                  تجربة سريعة: الطالب عمر حازم (01012345678)
-                </button>
+                {latestStudent ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIdentifier(latestStudent.phone || latestStudent.id);
+                      setPassword(latestStudent.password || '123456');
+                    }}
+                    className="text-blue-400 hover:text-blue-300 underline underline-offset-4 cursor-pointer"
+                  >
+                    تجربة سريعة: الطالب {latestStudent.full_name} ({latestStudent.phone || latestStudent.id})
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleTabChange('register')}
+                    className="text-blue-400 hover:text-blue-300 underline underline-offset-4 cursor-pointer"
+                  >
+                    سجّل أول طالب في المنصة الآن ➔
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => handleTabChange('register')}
@@ -379,7 +392,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   />
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1.5">
-                  💡 للتجربة المباشرة: جرب رقم <strong>01012345678</strong> (الطالب عمر حازم) أو رقم الطالب الجديد الذي سجلته.
+                  {latestStudent ? (
+                    <>
+                      💡 للتجربة المباشرة: اضغط على رقم هاتف الطالب ({latestStudent.full_name}):{' '}
+                      <button
+                        type="button"
+                        onClick={() => setStudentPhoneForParent(latestStudent.phone || latestStudent.id)}
+                        className="text-emerald-400 hover:underline font-mono font-bold cursor-pointer"
+                      >
+                        {latestStudent.phone || latestStudent.id}
+                      </button>
+                    </>
+                  ) : (
+                    <>💡 للتجربة: يرجى تسجيل طالب أولاً من تبويب "حساب جديد" ثم إدخال رقم هاتفه هنا.</>
+                  )}
                 </p>
               </div>
 

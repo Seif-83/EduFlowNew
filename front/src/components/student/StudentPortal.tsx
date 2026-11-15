@@ -23,6 +23,7 @@ import confetti from 'canvas-confetti';
 import { Profile, Session, Exam, Assignment, StudentPayment, ExamAttempt } from '../../types/database';
 import { db } from '../../services/mockDatabase';
 import { generateLessonContent } from '../../services/aiGenerator';
+import { askGeminiTutor } from '../../services/geminiService';
 import { sounds } from '../../services/soundEffects';
 import { sendN8nEvent } from '../../services/n8nService';
 import { Flashcard3D } from '../common/Flashcard3D';
@@ -286,14 +287,43 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     setTimeout(() => setComplaintSuccessMsg(''), 4000);
   };
 
-  // Send AI Chat Message
-  const handleSendChat = (e: React.FormEvent) => {
+  // Send AI Chat Message - Powered by n8n AI Agent Hub
+  const handleSendChat = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim()) return;
+    const query = chatInput.trim();
+    if (!query) return;
 
-    db.sendAiMessage(currentStudent.id, chatInput);
     setChatInput('');
-    setChatMessages(db.getAiMessages(currentStudent.id));
+    db.sendAiMessage(currentStudent.id, query);
+    setChatMessages([...db.getAiMessages(currentStudent.id)]);
+
+    // 1. Dispatch to n8n AI Tutor Agent
+    try {
+      const n8nRes = await sendN8nEvent('ai_tutor_chat', {
+        question: query,
+        grade: currentStudent.grade_level || 'المرحلة الإعدادية',
+        student_name: currentStudent.full_name,
+      });
+      const aiReply = n8nRes.data?.data?.reply || n8nRes.data?.reply;
+      if (n8nRes.success && aiReply) {
+        db.updateLastAiAssistantMessage(currentStudent.id, aiReply);
+        setChatMessages([...db.getAiMessages(currentStudent.id)]);
+        return;
+      }
+    } catch (err) {
+      console.info('n8n AI agent fallback:', err);
+    }
+
+    // 2. Direct Gemini fallback
+    try {
+      const geminiAnswer = await askGeminiTutor(query, currentStudent.grade_level || 'المرحلة الإعدادية');
+      if (geminiAnswer) {
+        db.updateLastAiAssistantMessage(currentStudent.id, geminiAnswer);
+        setChatMessages([...db.getAiMessages(currentStudent.id)]);
+      }
+    } catch {
+      // Local fallback in place
+    }
   };
 
   const myExamAttempts = db.getExamAttempts(currentStudent.id);

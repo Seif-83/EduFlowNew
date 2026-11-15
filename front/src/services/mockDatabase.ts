@@ -27,6 +27,7 @@ import {
   StudentFollowUpRecord,
 } from '../types/database';
 import { sendN8nEvent } from './n8nService';
+import { supabase, createStudentInSupabase, resetSupabaseTestStudents } from './supabaseClient';
 
 const STORAGE_KEY = 'eduflow_db_v1';
 
@@ -451,6 +452,42 @@ class MockDatabaseService {
 
   constructor() {
     this.state = this.loadState();
+    // Auto sync from live Supabase cloud database
+    this.syncFromSupabase();
+  }
+
+  async syncFromSupabase(): Promise<void> {
+    try {
+      const { data: profiles, error } = await supabase.from('profiles').select('*');
+      if (!error && profiles && profiles.length > 0) {
+        profiles.forEach((p) => {
+          const idx = this.state.profiles.findIndex(
+            (ep) => ep.id === p.id || (ep.email && ep.email === p.email)
+          );
+          if (idx >= 0) {
+            this.state.profiles[idx] = {
+              ...this.state.profiles[idx],
+              full_name: p.full_name || this.state.profiles[idx].full_name,
+              role: p.role as any,
+              phone: p.phone || this.state.profiles[idx].phone,
+            };
+          } else {
+            this.state.profiles.push({
+              id: p.id,
+              full_name: p.full_name,
+              email: p.email,
+              phone: p.phone || '',
+              role: p.role as any,
+              created_at: p.created_at,
+            });
+          }
+        });
+        this.persist();
+        this.notify();
+      }
+    } catch (err) {
+      console.info('Supabase initial fetch note:', err);
+    }
   }
 
   subscribe(listener: () => void): () => void {
@@ -540,6 +577,9 @@ class MockDatabaseService {
   resetToDefault() {
     this.state = getInitialData();
     this.persist();
+    resetSupabaseTestStudents().then(() => {
+      console.log('Cleaned up test students from Supabase cloud on reset.');
+    });
   }
 
   reset() {
@@ -717,7 +757,8 @@ class MockDatabaseService {
     teacher_id?: string;
   }): Profile {
     const newId = 'stu-' + Math.floor(100000 + Math.random() * 900000);
-    const email = data.email?.trim() || `stu.${data.phone.trim().slice(-4) || 'user'}@eduflow.edu`;
+    const cleanPhone = data.phone.trim().replace(/\D/g, '') || Math.floor(100000 + Math.random() * 900000).toString();
+    const email = data.email?.trim() || `stu.${cleanPhone}@eduflow.edu`;
     
     const teacherId = data.teacher_id || (data.group_id === 'g-2' ? 'tea-2' : 'tea-1');
     const teacher = this.state.profiles.find((p) => p.id === teacherId);
@@ -743,8 +784,8 @@ class MockDatabaseService {
 
     this.state.profiles.push(student);
 
+    const group = groupId ? this.state.groups.find((g) => g.id === groupId) : null;
     if (groupId) {
-      const group = this.state.groups.find((g) => g.id === groupId);
       this.state.enrollments.push({
         id: 'enr-' + Date.now(),
         student_id: newId,
@@ -755,6 +796,32 @@ class MockDatabaseService {
         group_name: group?.name || 'المجموعة الدراسية',
       });
     }
+
+    // 1. Direct Cloud Sync to Supabase Auth & Profiles
+    createStudentInSupabase({
+      full_name: student.full_name,
+      phone: student.phone,
+      email: student.email,
+      password: data.password || 'password123456',
+    }).then((res) => {
+      if (res.success && res.id) {
+        student.id = res.id;
+        this.persist();
+        this.notify();
+      }
+    });
+
+    // 2. Trigger n8n Automation Workflow
+    sendN8nEvent('new_student_registered', {
+      student_name: student.full_name,
+      student_id: student.id,
+      phone: student.phone,
+      email: student.email,
+      grade_level: data.grade_level,
+      teacher_id: teacherId,
+      teacher_name: teacher?.full_name || 'أ. أحمد رضوان',
+      group_name: group?.name || 'المجموعة الدراسية',
+    });
 
     this.state.currentUserId = newId;
     this.persist();
@@ -1324,6 +1391,18 @@ class MockDatabaseService {
     };
 
     this.state.complaints.unshift(complaint);
+
+    // Trigger n8n complaint triage workflow
+    sendN8nEvent('complaint_submitted', {
+      ticket_id: complaint.id,
+      user_name: user?.full_name,
+      user_role: user?.role,
+      subject: data.subject,
+      description: data.description,
+      category: data.category || 'عام',
+      priority: data.priority || 'normal',
+    });
+
     this.persist();
     return complaint;
   }
@@ -1453,6 +1532,18 @@ class MockDatabaseService {
       student_name: student?.full_name,
     };
     this.state.studentNotes.unshift(entry);
+
+    // Trigger n8n note notification workflow
+    const parentProfile = this.state.profiles.find((p) => p.id === student?.parent_id);
+    sendN8nEvent('note_added', {
+      student_name: student?.full_name,
+      student_id: studentId,
+      teacher_name: teacher?.full_name,
+      note_text: note,
+      parent_email: parentProfile?.email || student?.parent_email,
+      parent_name: parentProfile?.full_name,
+    });
+
     this.persist();
     return entry;
   }
@@ -1534,6 +1625,18 @@ class MockDatabaseService {
 
     this.persist();
     return { userMsg, assistantMsg };
+  }
+
+  updateLastAiAssistantMessage(userId: string, newReply: string): void {
+    const conv = this.state.aiConversations.find((c) => c.user_id === userId);
+    if (!conv) return;
+    const assistantMessages = this.state.aiMessages.filter(
+      (m) => m.conversation_id === conv.id && m.sender === 'assistant'
+    );
+    if (assistantMessages.length > 0) {
+      assistantMessages[assistantMessages.length - 1].message = newReply;
+      this.persist();
+    }
   }
 
   // ==========================================
@@ -1632,6 +1735,32 @@ class MockDatabaseService {
       title: 'مرحباً بك في منصة EduFlow 🎓',
       message: `تم تسجيل حسابك بنجاح بواسطة المنسق الإداري، وانضمامك لمجموعتك الدراسية. يمكنك الآن استعراض الحصص والواجبات.`,
       type: 'info',
+    });
+
+    // 1. Direct Cloud Sync to Supabase Auth & Profiles
+    createStudentInSupabase({
+      full_name: newStudent.full_name,
+      phone: newStudent.phone,
+      email: newStudent.email,
+      password: 'password123456',
+    }).then((res) => {
+      if (res.success && res.id) {
+        newStudent.id = res.id;
+        this.persist();
+        this.notify();
+      }
+    });
+
+    // 2. Trigger n8n Automation Workflow
+    sendN8nEvent('new_student_registered', {
+      student_name: newStudent.full_name,
+      student_id: newStudent.id,
+      phone: newStudent.phone,
+      email: newStudent.email,
+      grade_level: newStudent.grade_level,
+      parent_name: data.parent_name || 'ولي أمر الطالب',
+      parent_phone: data.parent_phone || newStudent.phone,
+      group_name: group?.name || 'المجموعة الدراسية',
     });
 
     this.persist();

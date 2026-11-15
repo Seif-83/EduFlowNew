@@ -9,9 +9,15 @@ export interface N8nWebhookResponse {
 }
 
 export async function sendN8nEvent(event: string, data: Record<string, any>): Promise<N8nWebhookResponse> {
+  const geminiKey =
+    (import.meta as any).env?.VITE_GEMINI_API_KEY ||
+    (import.meta as any).env?.GEMINI_API_KEY ||
+    '';
+
   const payload = {
     event,
     timestamp: new Date().toISOString(),
+    gemini_key: geminiKey,
     data,
   };
 

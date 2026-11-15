@@ -1,21 +1,20 @@
 {
-  "name": "EduFlow - LMS Automation Hub",
+  "name": "EduFlow - AI Agent & Supabase Hub v5",
   "nodes": [
     {
       "parameters": {
         "httpMethod": "POST",
         "path": "eduflow",
-        "responseMode": "onReceived",
-        "responseData": "allEntries",
+        "responseMode": "lastNode",
         "options": {}
       },
-      "id": "a1000000-0000-0000-0000-000000000001",
+      "id": "node-webhook-01",
       "name": "Webhook - EduFlow Events",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
         180,
-        400
+        500
       ],
       "webhookId": "eduflow"
     },
@@ -28,226 +27,704 @@
               "triggerAtDay": [
                 1
               ],
-              "triggerAtHour": 9,
-              "triggerAtMinute": 0
+              "triggerAtHour": 9
             }
           ]
         }
       },
-      "id": "a1000000-0000-0000-0000-000000000002",
-      "name": "Weekly Schedule Trigger",
+      "id": "node-schedule-02",
+      "name": "Weekly Payment Reminder Schedule",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
         180,
-        640
+        900
       ]
     },
     {
       "parameters": {
-        "jsCode": "// Normalize incoming event payload\nconst input = $input.first().json;\n\nlet event = input.body?.event || input.event || 'test_ping';\nlet data = input.body?.data || input.data || {};\nlet timestamp = input.body?.timestamp || input.timestamp || new Date().toISOString();\n\n// If triggered by schedule, default to payment and attendance check\nif ($node[\"Weekly Schedule Trigger\"] && Object.keys(input).length === 0) {\n  event = 'payment_reminder';\n  data = {\n    source: 'weekly_cron',\n    period: 'الاشتراك الشهري الحالي'\n  };\n}\n\nreturn {\n  json: {\n    event,\n    timestamp,\n    received_at: new Date().toISOString(),\n    data\n  }\n};"
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\n\nlet event = body.event;\nlet data = body.data || {};\n\nif (!event && $input.first().json.timestamp && !$input.first().json.event) {\n  event = 'payment_reminder';\n  data = { trigger: 'cron_weekly_monday_9am', reminderType: 'monthly_tuition' };\n}\n\nreturn [{\n  json: {\n    event: event || 'test_ping',\n    timestamp: body.timestamp || new Date().toISOString(),\n    data: data,\n    gemini_key: body.gemini_key || $env.GEMINI_API_KEY || '',\n    supabase_config: {\n      url: 'https://zhbntxnsdznpdqmjyxpp.supabase.co',\n      apiKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA'\n    }\n  }\n}];"
       },
-      "id": "a1000000-0000-0000-0000-000000000003",
-      "name": "Normalize & Parse Event",
+      "id": "node-normalize-03",
+      "name": "Normalize and Parse Event",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        440,
+        460,
         500
       ]
     },
     {
       "parameters": {
-        "dataType": "string",
-        "value1": "={{ $json.event }}",
+        "mode": "rules",
         "rules": {
-          "rules": [
+          "values": [
             {
-              "value2": "exam_submitted",
-              "output": 0
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-0-ai_tutor_chat",
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "ai_tutor_chat",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "AI Tutor Chat"
             },
             {
-              "value2": "attendance_marked",
-              "output": 1
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-1-ai_generate_lesson",
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "ai_generate_lesson",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "AI Lesson Generator"
             },
             {
-              "value2": "payment_reminder",
-              "output": 2
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-2-exam_submitted",
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "exam_submitted",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Exam Submitted"
             },
             {
-              "value2": "complaint_submitted",
-              "output": 3
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-3-attendance_marked",
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "attendance_marked",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Attendance Marked"
             },
             {
-              "value2": "rag_ingest",
-              "output": 4
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-4-new_student_registered",
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "new_student_registered",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "New Student Registered"
             },
             {
-              "value2": "test_ping",
-              "output": 5
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-5-complaint_submitted",
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "complaint_submitted",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Complaint Submitted"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-6-note_added",
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "note_added",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Note Added"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-7-fetch_supabase_data",
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "fetch_supabase_data",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Fetch Supabase Data"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-8-test_ping",
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "test_ping",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Manual Pipeline Test"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "cond-fallback-catchall",
+                    "leftValue": "={{ 1 }}",
+                    "rightValue": 1,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Fallback & Diagnostics"
             }
           ]
         },
-        "fallbackOutput": 5
+        "options": {}
       },
-      "id": "a1000000-0000-0000-0000-000000000004",
-      "name": "Router: Event Selector",
+      "id": "node-switch-04",
+      "name": "Router - Event Switch",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3,
       "position": [
-        700,
+        780,
         500
       ]
     },
     {
       "parameters": {
-        "jsCode": "const data = $json.data || {};\nconst earned = Number(data.earnedScore ?? data.score ?? 0);\nconst total = Number(data.totalScore ?? 100);\nconst percentage = total > 0 ? Math.round((earned / total) * 100) : 0;\nconst passingPercentage = Number(data.passingPercentage ?? 65);\nconst passed = percentage >= passingPercentage;\n\nlet gradeText = 'يحتاج لمزيد من الاجتهاد والمتابعة ⚠️';\nif (percentage >= 90) gradeText = 'ممتاز مع مرتبة الشرف 🏆';\nelse if (percentage >= 75) gradeText = 'جيد جداً 🌟';\nelse if (percentage >= 60) gradeText = 'جيد وناجح 👍';\n\nreturn {\n  json: {\n    student_name: data.student_name || 'طالب متميز',\n    student_id: data.student_id || 'stu-unknown',\n    exam_title: data.exam_title || 'اختبار تقييم المستوى',\n    parent_email: data.parent_email || 'parent@eduflow.edu',\n    parent_name: data.parent_name || 'ولي أمر الطالب',\n    earned_score: earned,\n    total_score: total,\n    percentage,\n    passing_percentage: passingPercentage,\n    passed,\n    grade_text: gradeText,\n    submitted_at: $json.timestamp\n  }\n};"
+        "jsCode": "const item = $input.first().json;\nconst d = item.data;\nconst question = d.question || d.message || 'ما هي النصائح للمذاكرة؟';\nconst grade = d.grade || 'المرحلة الإعدادية';\n\nconst prompt = `أنت \"المعلم الذكي\" المعتمد في منصة EduFlow التعليمية (نظام ذكاء اصطناعي مدعوم بـ n8n و Gemini).\nأنت تتحدث بلطف وتشجيع مع طالب في ${grade}.\nسؤال الطالب: \"${question}\"\n\nأجب باختصار وترتيب (في 2-4 أسطر) مقدماً شرحاً علمياً مبسطاً، مع أمثلة من الحياة أو المنهج المصري، واختم بعبارة تشجيعية للطالب. باللغة العربية الفصحى.`;\n\nreturn [{\n  json: {\n    ...item,\n    question: question,\n    tutor_prompt: prompt\n  }\n}];"
       },
-      "id": "b1000000-0000-0000-0000-000000000001",
-      "name": "Evaluate Exam Result",
+      "id": "node-tutor-prep-05",
+      "name": "1. Format AI Tutor Prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        980,
-        200
+        1100,
+        60
       ]
     },
     {
       "parameters": {
-        "conditions": {
-          "boolean": [
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={{ $json.gemini_key }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
             {
-              "value1": "={{ $json.passed }}",
-              "value2": true
+              "name": "Content-Type",
+              "value": "application/json"
             }
           ]
-        }
-      },
-      "id": "b1000000-0000-0000-0000-000000000002",
-      "name": "Check If Exam Passed",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [
-        1220,
-        200
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const item = $json;\nconst emailHtml = `\n<div dir=\"rtl\" style=\"font-family: Arial, Tahoma, sans-serif; max-width: 600px; margin: 0 auto; border: 2px solid #10b981; border-radius: 16px; overflow: hidden; background: #ffffff;\">\n  <div style=\"background: linear-gradient(135deg, #059669, #10b981); padding: 24px; text-align: center; color: white;\">\n    <h1 style=\"margin: 0; font-size: 24px;\">🎓 منصة EduFlow التعليمية</h1>\n    <p style=\"margin: 6px 0 0; opacity: 0.9; font-size: 15px;\">تقرير النتيجة والشهادة الرقمية</p>\n  </div>\n  <div style=\"padding: 24px; color: #1e293b;\">\n    <p style=\"font-size: 16px;\">السيد/ <strong>${item.parent_name}</strong> المحترم،</p>\n    <p style=\"font-size: 15px; line-height: 1.6;\">\n      يسرنا إبلاغكم بنجاح وتميز نجلكم/كريمتكم <strong>${item.student_name}</strong> في اختبار:\n    </p>\n    <div style=\"background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 18px; margin: 18px 0; text-align: center;\">\n      <h3 style=\"margin: 0 0 10px; color: #166534; font-size: 18px;\">${item.exam_title}</h3>\n      <div style=\"font-size: 32px; font-weight: bold; color: #15803d; margin: 8px 0;\">${item.percentage}%</div>\n      <p style=\"margin: 0; color: #14532d; font-size: 15px;\">الدرجة: <strong>${item.earned_score} من ${item.total_score}</strong> (${item.grade_text})</p>\n    </div>\n    <p style=\"font-size: 13px; color: #64748b;\">تم رصد النتيجة بنجاح في سجلات الكنترول الأكاديمي لمنصة EduFlow عبر n8n.</p>\n  </div>\n  <div style=\"background: #f8fafc; padding: 14px; text-align: center; color: #94a3b8; font-size: 12px; border-top: 1px solid #e2e8f0;\">\n    نظام الإشعارات الآلي لمنصة EduFlow الذكية\n  </div>\n</div>\n`;\n\nreturn {\n  json: {\n    status: 'success',\n    action: 'parent_congratulation_sent',\n    recipient: item.parent_email,\n    subject: `🎉 تهنئة بنجاح ${item.student_name} في اختبار ${item.exam_title}`,\n    html_content: emailHtml,\n    sync_to_sheet: true,\n    data: item\n  }\n};"
-      },
-      "id": "b1000000-0000-0000-0000-000000000003",
-      "name": "Format Pass Certificate & Email",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1460,
-        120
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const item = $json;\nconst warningHtml = `\n<div dir=\"rtl\" style=\"font-family: Arial, Tahoma, sans-serif; max-width: 600px; margin: 0 auto; border: 2px solid #f59e0b; border-radius: 16px; overflow: hidden; background: #ffffff;\">\n  <div style=\"background: linear-gradient(135deg, #d97706, #f59e0b); padding: 24px; text-align: center; color: white;\">\n    <h1 style=\"margin: 0; font-size: 24px;\">⚠️ منصة EduFlow التعليمية</h1>\n    <p style=\"margin: 6px 0 0; opacity: 0.9; font-size: 15px;\">تقرير المتابعة الأكاديمية</p>\n  </div>\n  <div style=\"padding: 24px; color: #1e293b;\">\n    <p style=\"font-size: 16px;\">السيد/ <strong>${item.parent_name}</strong> المحترم،</p>\n    <p style=\"font-size: 15px; line-height: 1.6;\">\n      نحيطكم علماً بأن الطالب <strong>${item.student_name}</strong> حصل في اختبار <strong>${item.exam_title}</strong> على نتيجة:\n    </p>\n    <div style=\"background: #fffbeb; border: 1px solid #fde68a; border-radius: 12px; padding: 18px; margin: 18px 0; text-align: center;\">\n      <div style=\"font-size: 30px; font-weight: bold; color: #b45309; margin: 8px 0;\">${item.percentage}%</div>\n      <p style=\"margin: 0; color: #92400e; font-size: 14px;\">الدرجة: ${item.earned_score} من ${item.total_score} (الحد الأدنى للنجاح: ${item.passing_percentage}%)</p>\n    </div>\n    <div style=\"background: #f8fafc; border-right: 4px solid #6366f1; padding: 12px; border-radius: 8px; margin: 16px 0;\">\n      <h4 style=\"margin: 0 0 6px; color: #3730a3;\">💡 خطة الدعم الفوري المقترحة:</h4>\n      <ul style=\"margin: 0; padding-right: 18px; color: #475569; font-size: 13px;\">\n        <li>سيقوم المساعد الأكاديمي بالتواصل مع الطالب وتحديد مواطن الصعوبة.</li>\n        <li>تم إتاحة اختبار تعويضي مخصص للطالب لمراجعة المفاهيم الأساسية.</li>\n      </ul>\n    </div>\n  </div>\n</div>\n`;\n\nreturn {\n  json: {\n    status: 'needs_attention',\n    action: 'remedial_support_alert_sent',\n    recipient: item.parent_email,\n    subject: `📋 تقرير متابعة أكاديمية: اختبار ${item.exam_title} للطالب ${item.student_name}`,\n    html_content: warningHtml,\n    assistant_task_created: true,\n    data: item\n  }\n};"
-      },
-      "id": "b1000000-0000-0000-0000-000000000004",
-      "name": "Format Remedial Notice",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1460,
-        260
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const data = $json.data || {};\nconst records = Array.isArray(data.records) ? data.records : [data];\nconst absentStudents = records.filter(r => (r.status || '').toLowerCase() === 'absent');\n\nreturn {\n  json: {\n    total_checked: records.length,\n    absent_count: absentStudents.length,\n    group_name: data.group_name || 'المجموعة الدراسية العامة',\n    session_title: data.session_title || 'الحصة الأسبوعية',\n    date: data.date || new Date().toISOString().split('T')[0],\n    absent_students: absentStudents.map(s => ({\n      student_name: s.student_name || 'طالب',\n      student_id: s.student_id,\n      parent_phone: s.parent_phone || 'غير مسجل',\n      parent_email: s.parent_email || 'parent@eduflow.edu',\n      consecutive_absences: Number(s.consecutive_absences || 1)\n    }))\n  }\n};"
-      },
-      "id": "c1000000-0000-0000-0000-000000000001",
-      "name": "Filter Absent Students",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        980,
-        420
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const item = $json;\nconst absent = item.absent_students || [];\n\nconst messages = absent.map(s => {\n  const isCritical = s.consecutive_absences >= 2;\n  return {\n    recipient_email: s.parent_email,\n    recipient_phone: s.parent_phone,\n    student_name: s.student_name,\n    is_critical: isCritical,\n    sms_text: `منصة EduFlow: نود إحاطتكم بغياب ${s.student_name} عن ${item.session_title} (${item.group_name}) بتاريخ ${item.date}.${isCritical ? ' تنبيه: هذا هو الغياب الثاني على التوالي، نرجو التواصل فوراً.' : ''}`,\n    email_subject: `⚠️ إشعار غياب: الطالب ${s.student_name} - ${item.group_name}`\n  };\n});\n\nreturn {\n  json: {\n    status: 'success',\n    total_absent_alerts: messages.length,\n    session: item.session_title,\n    group: item.group_name,\n    date: item.date,\n    dispatched_notifications: messages\n  }\n};"
-      },
-      "id": "c1000000-0000-0000-0000-000000000002",
-      "name": "Generate Absence Alerts",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1260,
-        420
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const data = $json.data || {};\nconst students = Array.isArray(data.students) ? data.students : [\n  {\n    student_name: data.student_name || 'عمر حازم السيد',\n    parent_email: data.parent_email || 'walid.hazem@gmail.com',\n    amount: data.amount || 450,\n    due_date: data.due_date || '2026-10-05',\n    invoice_title: data.invoice_title || 'اشتراك شهر أكتوبر 2026'\n  }\n];\n\nconst reminders = students.map(st => {\n  return {\n    parent_email: st.parent_email,\n    student_name: st.student_name,\n    amount: st.amount,\n    currency: 'EGP',\n    due_date: st.due_date,\n    invoice_title: st.invoice_title,\n    message: `سعادة ولي أمر الطالب ${st.student_name}، نود تذكيركم بموعد سداد (${st.invoice_title}) وقيمته ${st.amount} ج.م والمستحق في ${st.due_date}. يمكن السداد عبر فودافون كاش أو الدفع الإلكتروني بالمنصة.`\n  };\n});\n\nreturn {\n  json: {\n    status: 'success',\n    action: 'billing_reminders_generated',\n    count: reminders.length,\n    reminders\n  }\n};"
-      },
-      "id": "d1000000-0000-0000-0000-000000000001",
-      "name": "Process Billing Reminders",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        980,
-        560
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const data = $json.data || {};\nconst ticketId = 'EDF-' + Math.floor(100000 + Math.random() * 900000);\nconst category = data.category || 'general';\n\nlet priority = 'عادية';\nif (category === 'academic' || category === 'complaint') priority = 'عالية 🔴';\nelse if (category === 'billing') priority = 'متوسطة 🟡';\n\nreturn {\n  json: {\n    ticket_id: ticketId,\n    submitter_name: data.user_name || 'أحد مستخدمي المنصة',\n    submitter_role: data.user_role || 'parent',\n    title: data.title || 'طلب متابعة وملاحظة',\n    description: data.description || '',\n    category,\n    priority,\n    created_at: new Date().toISOString(),\n    admin_alert: `🚨 تذكرة دعم جديدة [#${ticketId}]: ${data.title} - الأولوية: ${priority}`,\n    user_receipt: `شكراً لتواصلك معنا. تم تسجيل تذكرتك برقم #${ticketId} وجاري مراجعتها من قبل إدارة EduFlow.`\n  }\n};"
-      },
-      "id": "e1000000-0000-0000-0000-000000000001",
-      "name": "Triage Support Complaint",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        980,
-        700
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const data = $json.data || {};\nconst content = data.content || data.lesson_text || 'مفاهيم الوحدة الدراسية الأساسية';\nconst title = data.title || 'المحاضرة التعليمية';\n\n// Simulate semantic chunking\nconst chunks = [\n  { chunk_id: 1, text: content.slice(0, 300), token_estimate: 75 },\n  { chunk_id: 2, text: content.slice(300, 600), token_estimate: 80 }\n];\n\nreturn {\n  json: {\n    status: 'indexed',\n    material_title: title,\n    chunks_count: chunks.length,\n    vector_dimensions: 768,\n    model: 'text-embedding-004 / Gemini AI',\n    chunks,\n    ai_status: 'جاهز للإجابة عبر شات بوت الذكاء الاصطناعي للطالب'\n  }\n};"
-      },
-      "id": "f1000000-0000-0000-0000-000000000001",
-      "name": "RAG Embeddings & Ingestion",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        980,
-        840
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "return {\n  json: {\n    status: 'success',\n    ping: 'pong',\n    service: 'EduFlow n8n Engine',\n    uptime_check: 'Healthy 🟢',\n    endpoints_active: [\n      'exam_submitted',\n      'attendance_marked',\n      'payment_reminder',\n      'complaint_submitted',\n      'rag_ingest'\n    ],\n    timestamp: new Date().toISOString()\n  }\n};"
-      },
-      "id": "g1000000-0000-0000-0000-000000000001",
-      "name": "Test Ping Diagnostics",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        980,
-        980
-      ]
-    },
-    {
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify($json) }}",
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": {{ JSON.stringify($json.tutor_prompt) }}\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": 0.5,\n    \"maxOutputTokens\": 600\n  }\n}",
         "options": {}
       },
-      "id": "z1000000-0000-0000-0000-000000000001",
-      "name": "Respond to Webhook",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
+      "id": "node-gemini-tutor-06",
+      "name": "AI Agent - Gemini Smart Tutor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [
-        1800,
+        1440,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst text = response.candidates?.[0]?.content?.parts?.[0]?.text || 'مرحباً بك! أنا معلمك الذكي في EduFlow.';\n\nreturn [{\n  json: {\n    route: 'ai_tutor_chat',\n    reply: text,\n    ai_engine: 'n8n + Gemini 3.5 Flash-Lite',\n    status: 'success'\n  }\n}];"
+      },
+      "id": "node-tutor-parse-07",
+      "name": "Parse AI Tutor Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst d = item.data;\nconst lesson = d.lesson || 'التركيب الذري';\nconst grade = d.grade || 'الصف الثاني الإعدادي';\nconst difficulty = d.difficulty || 'متوسط متوازن';\nconst qCount = d.questionsCount || 5;\n\nconst prompt = `أنت خبير تربوي ومصمم مناهج تعليمية ذكية في منصة EduFlow لطلاب ${grade}.\nالمطلوب إعداد وحدة تعليمية تفاعلية واختبار ذكي لموضوع: \"${lesson}\"، بمستوى صعوبة: \"${difficulty}\"، وعدد أسئلة اختبار: ${qCount}.\n\nقم بتوليد JSON صالح فقط يحتوي بدقة على البنية التالية بدون أي نصوص قبل أو بعد الـ JSON:\n{\n  \"title\": \"${lesson}\",\n  \"grade\": \"${grade}\",\n  \"difficulty\": \"${difficulty}\",\n  \"summary\": \"شرح تعليمي منظم ومبسط وشامل للدرس في فقرتين أو ثلاث فقرات بأسلوب جذاب ومحفز للطلاب\",\n  \"keyPoints\": [\n    \"النقطة الجوهرية الأولى من المنهج\",\n    \"النقطة الجوهرية الثانية\",\n    \"النقطة الجوهرية الثالثة\",\n    \"النقطة الجوهرية الرابعة\"\n  ],\n  \"flashcards\": [\n    { \"front\": \"سؤال استذكار سريع 1؟\", \"back\": \"إجابة ملخصة ومباشرة 1\" },\n    { \"front\": \"سؤال استذكار سريع 2؟\", \"back\": \"إجابة ملخصة ومباشرة 2\" },\n    { \"front\": \"سؤال استذكار سريع 3؟\", \"back\": \"إجابة ملخصة ومباشرة 3\" },\n    { \"front\": \"سؤال استذكار سريع 4؟\", \"back\": \"إجابة ملخصة ومباشرة 4\" }\n  ],\n  \"questions\": [\n    {\n      \"question\": \"نص السؤال الأول\",\n      \"choices\": [\"الاختيار أ\", \"الاختيار ب\", \"الاختيار ج\", \"الاختيار د\"],\n      \"correctIndex\": 0,\n      \"explanation\": \"شرح سبب صحة الإجابة\"\n    }\n  ]\n}\n\nملاحظات هامة جداً:\n1. توليد عدد أسئلة بالضبط يساوي ${qCount} في مصفوفة questions.\n2. كل سؤال يجب أن يحتوي على 4 اختيارات في مصفوفة choices.\n3. correctIndex يجب أن يكون رقم بين 0 و 3 يحدد الإجابة الصحيحة بدقة.`;\n\nreturn [{\n  json: {\n    ...item,\n    generator_prompt: prompt\n  }\n}];"
+      },
+      "id": "node-gen-prep-08",
+      "name": "2. Format Curriculum AI Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={{ $json.gemini_key }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": {{ JSON.stringify($json.generator_prompt) }}\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"responseMimeType\": \"application/json\",\n    \"temperature\": 0.3\n  }\n}",
+        "options": {}
+      },
+      "id": "node-gemini-gen-09",
+      "name": "AI Studio - Lesson & Quiz Generator",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst candidate = response.candidates?.[0]?.content?.parts?.[0]?.text;\nlet parsed = {};\ntry {\n  parsed = JSON.parse(candidate);\n} catch (e) {}\n\nreturn [{\n  json: {\n    route: 'ai_generate_lesson',\n    status: 'success',\n    ai_engine: 'n8n + Gemini Structured Generation',\n    lessonData: parsed\n  }\n}];"
+      },
+      "id": "node-gen-parse-10",
+      "name": "Parse Lesson & 3D Cards",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst d = item.data;\nconst pct = Math.round((d.earnedScore / (d.totalScore || 1)) * 100);\nconst passed = pct >= (d.passingPercentage || 70);\n\nconst notificationPayload = {\n  user_id: 'b2c6321d-6bc9-4547-83d7-82b7e0e84d9a',\n  title: passed ? `🎉 اجتياز اختبار: ${d.student_name}` : `📝 نتيجة اختبار: ${d.student_name}`,\n  message: `أتم الطالب ${d.student_name} حل ${d.exam_title || 'الاختبار'} بنتيجة ${d.earnedScore}/${d.totalScore} (%${pct}).`,\n  notification_type: 'exam',\n  is_read: false\n};\n\nreturn [{\n  json: {\n    ...item,\n    pct,\n    passed,\n    supabase_payload: notificationPayload\n  }\n}];"
+      },
+      "id": "node-exam-eval-11",
+      "name": "3. Evaluate Exam Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/notifications",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.supabase_payload) }}",
+        "options": {}
+      },
+      "id": "node-supabase-exam-12",
+      "name": "Supabase - Record Exam Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst d = item.data;\nconst records = Array.isArray(d.records) ? d.records : [];\nconst absent = records.filter(r => r.status === 'absent');\n\nconst alertPayload = {\n  user_id: 'b2c6321d-6bc9-4547-83d7-82b7e0e84d9a',\n  title: `⚠️ تنبيه كشف الحصة (${absent.length} طلاب غائبين)`,\n  message: `تم اعتماد كشف ${d.session_title || 'الحصة'} بواسطة ${d.teacher_name || 'المعلم'}. الغائبون: ${absent.map(s => s.student_name).join('، ') || 'لا يوجد'}.`,\n  notification_type: 'attendance',\n  is_read: false\n};\n\nreturn [{\n  json: {\n    ...item,\n    absent_count: absent.length,\n    supabase_payload: alertPayload\n  }\n}];"
+      },
+      "id": "node-att-prep-13",
+      "name": "4. Process Attendance Sheet",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/notifications",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.supabase_payload) }}",
+        "options": {}
+      },
+      "id": "node-supabase-att-14",
+      "name": "Supabase - Save Attendance Alerts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst d = item.data;\nconst email = d.email || `stu.${d.phone || Date.now()}@eduflow.edu`;\n\nreturn [{\n  json: {\n    ...item,\n    supabase_auth_payload: {\n      email: email,\n      password: 'password123456',\n      email_confirm: true,\n      user_metadata: {\n        full_name: d.student_name || 'طالب جديد',\n        role: 'student'\n      }\n    }\n  }\n}];"
+      },
+      "id": "node-auth-prep-15",
+      "name": "5. Format Student Auth Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        780
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://zhbntxnsdznpdqmjyxpp.supabase.co/auth/v1/admin/users",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.supabase_auth_payload) }}",
+        "options": {}
+      },
+      "id": "node-supabase-reg-16",
+      "name": "Supabase - Register Student Auth",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        780
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst d = item.data;\nconst ticketId = d.ticket_id || 'TICK-' + Date.now();\n\nreturn [{\n  json: {\n    ...item,\n    supabase_payload: {\n      user_id: 'b2c6321d-6bc9-4547-83d7-82b7e0e84d9a',\n      title: `📩 تذكرة استفسار #${ticketId}`,\n      message: `الموضوع: ${d.subject || 'عام'} • من: ${d.user_name || 'طالب'} • التفاصيل: ${d.description || ''}`,\n      notification_type: 'complaint',\n      is_read: false\n    }\n  }\n}];"
+      },
+      "id": "node-comp-prep-17",
+      "name": "6. Format Support Ticket",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/notifications",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.supabase_payload) }}",
+        "options": {}
+      },
+      "id": "node-supabase-comp-18",
+      "name": "Supabase - Insert Complaint Ticket",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst d = item.data;\n\nreturn [{\n  json: {\n    ...item,\n    supabase_payload: {\n      user_id: 'b2c6321d-6bc9-4547-83d7-82b7e0e84d9a',\n      title: `📝 ملاحظة من ${d.teacher_name || 'المعلم'} للطالب ${d.student_name}`,\n      message: d.note_text || 'تمت إضافة ملاحظة أكاديمية جديدة.',\n      notification_type: 'note',\n      is_read: false\n    }\n  }\n}];"
+      },
+      "id": "node-note-prep-19",
+      "name": "7. Format Teacher Note",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        1140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/notifications",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.supabase_payload) }}",
+        "options": {}
+      },
+      "id": "node-supabase-note-20",
+      "name": "Supabase - Save Note Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        1140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/profiles?select=*&order=created_at.desc",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-supabase-read-21",
+      "name": "Supabase - Live Read Profiles (GET)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        1320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst profiles = items.map(i => i.json);\n\nreturn [{\n  json: {\n    route: 'fetch_supabase_data',\n    status: 'success',\n    total_profiles: profiles.length,\n    profiles: profiles\n  }\n}];"
+      },
+      "id": "node-read-parse-22",
+      "name": "Format Live Supabase State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        1320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first() ? $input.first().json : {};\nreturn [{\n  json: {\n    success: true,\n    status: 'success',\n    event: item.event || 'handled',\n    reply: item.reply || null,\n    lesson: item.lesson || null,\n    data: item,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "node-respond-23",
+      "name": "Send Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2100,
         500
       ]
     }
@@ -257,192 +734,301 @@
       "main": [
         [
           {
-            "node": "Normalize & Parse Event",
+            "node": "Normalize and Parse Event",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Weekly Schedule Trigger": {
+    "Weekly Payment Reminder Schedule": {
       "main": [
         [
           {
-            "node": "Normalize & Parse Event",
+            "node": "Normalize and Parse Event",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Normalize & Parse Event": {
+    "Normalize and Parse Event": {
       "main": [
         [
           {
-            "node": "Router: Event Selector",
+            "node": "Router - Event Switch",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Router: Event Selector": {
+    "Router - Event Switch": {
       "main": [
         [
           {
-            "node": "Evaluate Exam Result",
+            "node": "1. Format AI Tutor Prompt",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Filter Absent Students",
+            "node": "2. Format Curriculum AI Prompt",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Process Billing Reminders",
+            "node": "3. Evaluate Exam Score",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Triage Support Complaint",
+            "node": "4. Process Attendance Sheet",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "RAG Embeddings & Ingestion",
+            "node": "5. Format Student Auth Data",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Test Ping Diagnostics",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Evaluate Exam Result": {
-      "main": [
-        [
-          {
-            "node": "Check If Exam Passed",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Check If Exam Passed": {
-      "main": [
-        [
-          {
-            "node": "Format Pass Certificate & Email",
+            "node": "6. Format Support Ticket",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Format Remedial Notice",
+            "node": "7. Format Teacher Note",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase - Live Read Profiles (GET)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Response",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Format Pass Certificate & Email": {
+    "1. Format AI Tutor Prompt": {
       "main": [
         [
           {
-            "node": "Respond to Webhook",
+            "node": "AI Agent - Gemini Smart Tutor",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Format Remedial Notice": {
+    "AI Agent - Gemini Smart Tutor": {
       "main": [
         [
           {
-            "node": "Respond to Webhook",
+            "node": "Parse AI Tutor Response",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Filter Absent Students": {
+    "Parse AI Tutor Response": {
       "main": [
         [
           {
-            "node": "Generate Absence Alerts",
+            "node": "Send Response",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Generate Absence Alerts": {
+    "2. Format Curriculum AI Prompt": {
       "main": [
         [
           {
-            "node": "Respond to Webhook",
+            "node": "AI Studio - Lesson & Quiz Generator",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Process Billing Reminders": {
+    "AI Studio - Lesson & Quiz Generator": {
       "main": [
         [
           {
-            "node": "Respond to Webhook",
+            "node": "Parse Lesson & 3D Cards",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Triage Support Complaint": {
+    "Parse Lesson & 3D Cards": {
       "main": [
         [
           {
-            "node": "Respond to Webhook",
+            "node": "Send Response",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "RAG Embeddings & Ingestion": {
+    "3. Evaluate Exam Score": {
       "main": [
         [
           {
-            "node": "Respond to Webhook",
+            "node": "Supabase - Record Exam Result",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Test Ping Diagnostics": {
+    "Supabase - Record Exam Result": {
       "main": [
         [
           {
-            "node": "Respond to Webhook",
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4. Process Attendance Sheet": {
+      "main": [
+        [
+          {
+            "node": "Supabase - Save Attendance Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase - Save Attendance Alerts": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5. Format Student Auth Data": {
+      "main": [
+        [
+          {
+            "node": "Supabase - Register Student Auth",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase - Register Student Auth": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6. Format Support Ticket": {
+      "main": [
+        [
+          {
+            "node": "Supabase - Insert Complaint Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase - Insert Complaint Ticket": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7. Format Teacher Note": {
+      "main": [
+        [
+          {
+            "node": "Supabase - Save Note Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase - Save Note Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase - Live Read Profiles (GET)": {
+      "main": [
+        [
+          {
+            "node": "Format Live Supabase State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Live Supabase State": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
             "type": "main",
             "index": 0
           }
@@ -452,5 +1038,19 @@
   },
   "settings": {
     "executionOrder": "v1"
-  }
+  },
+  "tags": [
+    {
+      "name": "EduFlow"
+    },
+    {
+      "name": "AI Automation"
+    },
+    {
+      "name": "Supabase"
+    },
+    {
+      "name": "Gemini Agent"
+    }
+  ]
 }

@@ -1,4 +1,6 @@
 import { GeneratedLessonData } from '../types/database';
+import { sendN8nEvent } from './n8nService';
+import { generateLessonWithGemini } from './geminiService';
 
 export async function generateLessonContent(params: {
   lesson: string;
@@ -11,8 +13,29 @@ export async function generateLessonContent(params: {
 }): Promise<GeneratedLessonData> {
   const { lesson, grade, difficulty, questionsCount } = params;
 
-  // Simulate network / AI latency
-  await new Promise((resolve) => setTimeout(resolve, 2000));
+  // 1. Try n8n AI Automation Hub first
+  try {
+    const n8nRes = await sendN8nEvent('ai_generate_lesson', params);
+    const n8nLesson = n8nRes.data?.data?.lessonData || n8nRes.data?.lessonData;
+    if (n8nRes.success && n8nLesson && Array.isArray(n8nLesson.questions) && n8nLesson.questions.length > 0) {
+      return n8nLesson;
+    }
+  } catch (err) {
+    console.info('n8n AI generator fallback:', err);
+  }
+
+  // 2. Direct Gemini AI generation fallback
+  try {
+    const geminiResult = await generateLessonWithGemini(params);
+    if (geminiResult && geminiResult.questions.length > 0) {
+      return geminiResult;
+    }
+  } catch (err) {
+    console.info('Gemini fallback to local generator:', err);
+  }
+
+  // 3. Fallback: Local realistic generation
+  await new Promise((resolve) => setTimeout(resolve, 1200));
 
   // Determine subject flavor
   const isBiology = /قلب|دوري|دم|تنفس|خلية|كائن|نبات|عضل/i.test(lesson);

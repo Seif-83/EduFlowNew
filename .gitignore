@@ -3,6 +3,14 @@
 .env.*
 !.env.example
 
+# Build and dependencies
+node_modules/
+front/node_modules/
+dist/
+front/dist/
+build/
+front/build/
+
 # Supabase local state
 supabase/.temp/
 supabase/.branches/
