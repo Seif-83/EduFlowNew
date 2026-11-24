@@ -32,18 +32,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin }) =
 
       {/* Top Navigation */}
       <header className="sticky top-0 z-50 backdrop-blur-xl bg-slate-950/80 border-b border-slate-800/80">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 min-h-[4.5rem] py-3 flex items-center justify-between gap-2 sm:gap-4">
+          <div className="flex items-center gap-2 sm:gap-3">
             <EduFlowLogo size="md" theme="dark" showSubtitle={false} />
             <span className="hidden sm:inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">
               LMS 2.0 الذكي
             </span>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             <button
               onClick={() => onNavigateToLogin('parent')}
-              className="px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-xl bg-slate-900 border border-slate-700/80 hover:border-emerald-500/60 text-slate-200 hover:text-emerald-300 text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+              className="px-2.5 py-2 sm:px-4 sm:py-2.5 rounded-xl bg-slate-900 border border-slate-700/80 hover:border-emerald-500/60 text-slate-200 hover:text-emerald-300 text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <Users className="w-4 h-4 text-emerald-400" />
               <span>دخول ولي الأمر</span>
@@ -51,7 +51,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin }) =
 
             <button
               onClick={() => onNavigateToLogin('student')}
-              className="px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-blue-600/25 transition-all flex items-center gap-2 cursor-pointer"
+              className="px-3 py-2 sm:px-5 sm:py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-blue-600/25 transition-all flex items-center gap-1.5 sm:gap-2 cursor-pointer"
             >
               <LogIn className="w-4 h-4" />
               <span>تسجيل الدخول</span>
@@ -61,16 +61,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigateToLogin }) =
       </header>
 
       {/* HERO SECTION */}
-      <section className="relative z-10 pt-12 pb-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto text-center flex-1 flex flex-col justify-center items-center">
+      <section className="relative z-10 pt-8 sm:pt-12 pb-16 sm:pb-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto text-center flex-1 flex flex-col justify-center items-center">
         {/* Modern Pill Badge */}
-        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-900/90 border border-slate-700 text-indigo-300 text-xs font-semibold mb-6 shadow-inner backdrop-blur-md">
-          <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-          <span>المنظومة التعليمية الذكية الأكثر تكاملاً لعام 2026</span>
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+        <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 rounded-full bg-slate-900/90 border border-slate-700 text-indigo-300 text-[11px] sm:text-xs font-semibold mb-6 shadow-inner backdrop-blur-md max-w-[95vw] truncate">
+          <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse shrink-0" />
+          <span className="truncate">المنظومة التعليمية الذكية الأكثر تكاملاً لعام 2026</span>
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
         </div>
 
         {/* Hero Title */}
-        <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black text-white tracking-tight leading-tight max-w-4xl mb-6">
+        <h1 className="text-2xl sm:text-4xl md:text-5xl lg:text-6xl font-black text-white tracking-tight leading-snug sm:leading-tight max-w-4xl mb-4 sm:mb-6">
           تعليم ذكي، متابعة لحظية،{' '}
           <span className="bg-gradient-to-r from-blue-400 via-indigo-300 to-emerald-400 bg-clip-text text-transparent">
             وتجربة تعليمية استثنائية

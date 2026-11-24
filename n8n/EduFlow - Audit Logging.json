@@ -1,0 +1,246 @@
+{
+  "name": "EduFlow - Audit Logging",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "d4c1c18a-6cfa-417e-8fa4-944cdf50ea3f",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// EduFlow SW-06 — Audit Logging\n// Handles both Sub-Workflow calls & Webhook POST calls\n\nconst items = $input.all();\n\nfunction isUuid(value) {\n  return typeof value === 'string' &&\n    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);\n}\n\nreturn items.map((item, index) => {\n  const raw = item.json ?? {};\n  const input = (raw.body && typeof raw.body === 'object') ? { ...raw, ...raw.body } : raw;\n\n  const action = String(input.action ?? '').trim();\n  const entityType = String(input.entity_type ?? '').trim();\n\n  if (!action) {\n    throw new Error(`Audit item ${index + 1}: \"action\" is required.`);\n  }\n  if (!entityType) {\n    throw new Error(`Audit item ${index + 1}: \"entity_type\" is required.`);\n  }\n  if (action.length > 120) {\n    throw new Error(`Audit item ${index + 1}: \"action\" must be 120 characters or fewer.`);\n  }\n  if (entityType.length > 80) {\n    throw new Error(`Audit item ${index + 1}: \"entity_type\" must be 80 characters or fewer.`);\n  }\n\n  const asJsonObject = (value, fieldName) => {\n    if (value === undefined || value === null) return null;\n    if (typeof value !== 'object' || Array.isArray(value)) {\n      throw new Error(`Audit item ${index + 1}: \"${fieldName}\" must be an object or null.`);\n    }\n    return value;\n  };\n\n  const detailsObj = asJsonObject(input.details, 'details') ?? {};\n\n  // Normalize workspace_id, actor_id, entity_id to UUID or null (safe for Postgres UUID columns)\n  let cleanWorkspaceId = null;\n  if (input.workspace_id) {\n    if (isUuid(input.workspace_id)) cleanWorkspaceId = input.workspace_id;\n    else detailsObj.original_workspace_id = String(input.workspace_id);\n  }\n\n  let cleanActorId = null;\n  if (input.actor_id) {\n    if (isUuid(input.actor_id)) cleanActorId = input.actor_id;\n    else detailsObj.original_actor_id = String(input.actor_id);\n  }\n\n  let cleanEntityId = null;\n  if (input.entity_id) {\n    if (isUuid(input.entity_id)) cleanEntityId = input.entity_id;\n    else detailsObj.original_entity_id = String(input.entity_id);\n  }\n\n  return {\n    json: {\n      workspace_id: cleanWorkspaceId,\n      actor_id: cleanActorId,\n      actor_role: input.actor_role ? String(input.actor_role).trim() : null,\n      action,\n      entity_type: entityType,\n      entity_id: cleanEntityId,\n      source: input.source ? String(input.source).trim().slice(0, 120) : 'n8n',\n      details: detailsObj,\n      before_data: asJsonObject(input.before_data, 'before_data'),\n      after_data: asJsonObject(input.after_data, 'after_data')\n    }\n  };\n});"
+      },
+      "id": "4c547626-5f3f-4e7e-acc8-782a2a911cb4",
+      "name": "Validate & Prepare Audit Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/audit_logs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "36e233e2-8e6f-4eb8-aa26-0d95949c1ab7",
+      "name": "Insert Audit Log into Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        672,
+        96
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {},
+      "id": "9810897c-7185-46f6-beb8-2fc06e6b8539",
+      "name": "Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "2b3a1a20-4d2a-4d71-9c1e-000000000606",
+              "name": "action",
+              "value": "audit.test",
+              "type": "string"
+            },
+            {
+              "id": "2b3a1a20-4d2a-4d71-9c1e-000000000607",
+              "name": "entity_type",
+              "value": "system",
+              "type": "string"
+            },
+            {
+              "id": "2b3a1a20-4d2a-4d71-9c1e-000000000608",
+              "name": "source",
+              "value": "SW-06 Manual Test",
+              "type": "string"
+            },
+            {
+              "id": "2b3a1a20-4d2a-4d71-9c1e-000000000609",
+              "name": "details",
+              "value": "{\"message\":\"Test record from n8n\"}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a613b328-81d8-4f06-acca-6a7bd76f4609",
+      "name": "Prepare Manual Test Event",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "eduflow-audit",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-audit-trigger",
+      "name": "Webhook – Audit Logging",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "webhookId": "eduflow-audit"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: true, audit_logged: true, data: $json } }}",
+        "options": {}
+      },
+      "id": "respond-audit-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        96
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Validate & Prepare Audit Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Prepare Audit Event": {
+      "main": [
+        [
+          {
+            "node": "Insert Audit Log into Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Manual Test Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Manual Test Event": {
+      "main": [
+        [
+          {
+            "node": "Validate & Prepare Audit Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook – Audit Logging": {
+      "main": [
+        [
+          {
+            "node": "Validate & Prepare Audit Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Audit Log into Supabase": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "af48b466-6abc-4527-bca1-6ee9525dd2b6",
+  "meta": {
+    "instanceId": "3b5f9f2abe3e60d61542b86048168743a7c19edb0532f18fe40c2c5723f46506"
+  },
+  "nodeGroups": [],
+  "id": "3jkmCltp9ph6lDE4",
+  "tags": []
+}

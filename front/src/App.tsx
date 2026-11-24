@@ -13,19 +13,36 @@ import { AdminPortal } from './components/admin/AdminPortal';
 import { ArrowLeftRight, LogIn, Home } from 'lucide-react';
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<'landing' | 'login' | 'app'>('landing');
+  const [currentProfile, setCurrentProfile] = useState<Profile | null>(() => {
+    return db.getCurrentProfile();
+  });
+
+  const [currentView, setCurrentView] = useState<'landing' | 'login' | 'app'>(() => {
+    const savedView = localStorage.getItem('eduflow_view') as 'landing' | 'login' | 'app' | null;
+    const active = db.getCurrentProfile();
+    if (active) {
+      return savedView === 'login' ? 'app' : (savedView || 'app');
+    }
+    return savedView || 'landing';
+  });
+
   const [loginInitialTab, setLoginInitialTab] = useState<'student' | 'teacher' | 'parent' | 'register'>('student');
-  const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
   const [, setTick] = useState(0);
+
+  // Synchronize current view to localStorage for persistence across reloads
+  useEffect(() => {
+    localStorage.setItem('eduflow_view', currentView);
+  }, [currentView]);
 
   // Subscribe to db state changes
   useEffect(() => {
     const unsubscribe = db.subscribe(() => {
       setTick((t) => t + 1);
       // Keep currentProfile synchronized with updated state
-      if (currentProfile) {
-        const updated = db.getProfileById(currentProfile.id);
+      const currentId = currentProfile?.id || db.state.currentUserId;
+      if (currentId) {
+        const updated = db.getProfileById(currentId);
         if (updated) {
           setCurrentProfile(updated);
         }
@@ -38,6 +55,7 @@ export default function App() {
     db.setCurrentProfile(profile.id);
     setCurrentProfile(profile);
     setCurrentView('app');
+    localStorage.setItem('eduflow_view', 'app');
     setIsRoleModalOpen(false);
   };
 
@@ -45,17 +63,7 @@ export default function App() {
     db.logout();
     setCurrentProfile(null);
     setCurrentView('landing');
-  };
-
-  const handleResetData = () => {
-    if (window.confirm('هل تريد بالتأكيد إعادة تعيين كل البيانات إلى الحالة الافتراضية التجريبية؟')) {
-      db.reset();
-      const first = db.getProfiles()[0];
-      if (first) {
-        db.setCurrentProfile(first.id);
-        setCurrentProfile(first);
-      }
-    }
+    localStorage.setItem('eduflow_view', 'landing');
   };
 
   // 1. Landing Welcome Page (Displays first when visiting the site)
@@ -65,6 +73,7 @@ export default function App() {
         onNavigateToLogin={(tab) => {
           setLoginInitialTab(tab || 'student');
           setCurrentView('login');
+          localStorage.setItem('eduflow_view', 'login');
         }}
       />
     );
@@ -79,8 +88,12 @@ export default function App() {
           db.setCurrentProfile(profile.id);
           setCurrentProfile(profile);
           setCurrentView('app');
+          localStorage.setItem('eduflow_view', 'app');
         }}
-        onBackToHome={() => setCurrentView('landing')}
+        onBackToHome={() => {
+          setCurrentView('landing');
+          localStorage.setItem('eduflow_view', 'landing');
+        }}
       />
     );
   }
@@ -92,7 +105,6 @@ export default function App() {
       <Header
         currentProfile={currentProfile}
         onOpenRoleModal={() => setIsRoleModalOpen(true)}
-        onResetData={handleResetData}
         onLogout={handleLogout}
       />
 
@@ -125,21 +137,24 @@ export default function App() {
       {/* Floating Navigation & Role Switcher */}
       <div className="fixed bottom-5 left-5 z-40 flex items-center gap-2">
         <button
-          onClick={() => setCurrentView('landing')}
+          onClick={() => {
+            setCurrentView('landing');
+            localStorage.setItem('eduflow_view', 'landing');
+          }}
           className="p-2.5 rounded-full bg-slate-900 text-slate-300 hover:text-white hover:bg-blue-600 transition-all border border-slate-700/50 shadow-xl cursor-pointer"
           title="الصفحة الرئيسية الترحيبية"
         >
           <Home className="w-4 h-4" />
         </button>
 
-        {['teacher', 'assistant', 'admin'].includes(currentProfile.role) && (
+        {currentProfile.role === 'admin' && (
           <button
             onClick={() => setIsRoleModalOpen(true)}
             className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-slate-900 text-white text-xs font-bold shadow-xl shadow-slate-900/30 hover:bg-teal-600 hover:scale-105 transition-all duration-200 border border-slate-700/50 cursor-pointer"
-            title="تبديل الحساب أو الصلاحية"
+            title="تبديل الحساب أو الصلاحية (خاص بالإدارة)"
           >
             <ArrowLeftRight className="w-4 h-4 text-teal-400" />
-            <span>تبديل الصلاحية (مساعد / معلم / إدارة)</span>
+            <span>تبديل الصلاحية (خاص بالإدارة)</span>
           </button>
         )}
 

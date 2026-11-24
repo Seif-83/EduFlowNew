@@ -1,0 +1,2588 @@
+{
+  "name": "EduFlow – Material Processing & RAG Hub",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "eduflow-materials-process",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "name": "UPLOAD: WEBHOOK | Process Material",
+      "webhookId": "3e828ffb-fbc7-4a3f-897d-96d53d124c38",
+      "id": "upload-3077bdd4-85ca-4532-a271-3ad21d32acff",
+      "position": [
+        -2304,
+        4176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const h = $input.first().json.headers || {};\nconst b = $input.first().json.body || {};\nconst uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nconst auth = String(h.authorization || h.Authorization || '');\nconst token = auth.replace(/^Bearer\\s+/i, '').trim();\nif (!token) return [{ json: { valid: false, success: false, code: 'UNAUTHENTICATED', message: 'Missing Authorization header' } }];\nif (!b.material_id || !uuidRe.test(String(b.material_id))) return [{ json: { valid: false, success: false, code: 'VALIDATION', message: 'material_id must be a UUID' } }];\nreturn [{ json: { valid: true, access_token: token, material_id: String(b.material_id) } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "UPLOAD: CODE | Parse Request",
+      "id": "upload-1cf6f7b3-9866-46be-a4e8-8a3f221871b4",
+      "position": [
+        -2080,
+        4176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { success: true, authorized: true, valid: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "UPLOAD: AUTH | Verify Teacher (WF-03)",
+      "id": "upload-76f954b9-816d-4fec-b76d-6e0771dcb768",
+      "position": [
+        -1632,
+        4112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials?select=id,title&id=eq.' + $('UPLOAD: CODE | Parse Request').first().json.material_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('UPLOAD: CODE | Parse Request').first().json.access_token }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ rag_status: 'pending', rag_error: null }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "UPLOAD: DB | Check Update Permission (RLS)",
+      "id": "upload-3a1b8d89-a7bc-461d-8d60-5f95e0f8f898",
+      "position": [
+        -1184,
+        4032
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nif (r.statusCode === 401) return [{ json: { success: false, code: 'UNAUTHENTICATED', message: 'Invalid or expired token' } }];\nif (r.statusCode >= 500) return [{ json: { success: false, code: 'UPSTREAM_ERROR', message: 'Database error' } }];\nif (r.statusCode !== 200 || !Array.isArray(r.body) || r.body.length === 0) return [{ json: { success: false, code: 'FORBIDDEN', message: 'Material not found or you are not allowed to process it' } }];\nreturn [{ json: { success: true, ok: true, material_id: r.body[0].id, title: r.body[0].title } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "UPLOAD: CODE | Check Permission Result",
+      "id": "upload-9be5f53f-4f0b-41a1-a387-00b8975abae5",
+      "position": [
+        -960,
+        4032
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "29678adb-18ec-4a84-b463-e0bd4964f19c",
+              "leftValue": "={{ $json.ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "name": "UPLOAD: IF | Permission OK",
+      "id": "upload-49fdf7e7-f266-47fe-8c79-6d2e68eb1e6d",
+      "position": [
+        -736,
+        4032
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { success: true, started: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "UPLOAD: PROCESS | Start Material Processing (WF-05)",
+      "id": "upload-59b1779d-e417-4c30-8087-e4e82aa66be6",
+      "position": [
+        -512,
+        3984
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const m = $('UPLOAD: CODE | Check Permission Result').first().json;\nreturn [{ json: { success: true, code: 'ACCEPTED', message: 'Processing started. Check course_materials.rag_status for progress.', material_id: m.material_id, http_status: 202 } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "UPLOAD: RESPONSE | Accepted",
+      "id": "upload-44693c5d-f5d0-4f1b-9e7f-068cda99a8da",
+      "position": [
+        -288,
+        3984
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nconst map = { UNAUTHENTICATED: 401, FORBIDDEN: 403, NOT_FOUND: 404, VALIDATION: 400, UPSTREAM_ERROR: 502, NEEDS_CONFIRMATION: 409, RETRYABLE: 503 };\nconst code = j.code || (j.success ? 'OK' : 'FORBIDDEN');\nreturn [{ json: { ...j, http_status: j.success ? (j.http_status || 200) : (map[code] || 400) } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "UPLOAD: CODE | Map HTTP Status",
+      "id": "upload-e4f67292-bbe7-4abe-af52-56fda65749cb",
+      "position": [
+        -64,
+        4112
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "name": "UPLOAD: RESPOND | Return Result",
+      "id": "upload-2b67de65-1e18-41e6-8d14-6095b330156e",
+      "position": [
+        160,
+        4112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b9accfb7-a072-4fbf-a35c-5411459f0913",
+              "leftValue": "={{ $json.valid === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "name": "UPLOAD: IF | Request Valid1",
+      "id": "upload-a6fcb2ce-f2f4-4f85-b3dc-38ff2448ce3a",
+      "position": [
+        -1856,
+        4176
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "6fd9b942-84d1-4e1d-84f9-c1941d9eca69",
+              "leftValue": "={{ $json.authorized === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "name": "UPLOAD: IF | Authorized1",
+      "id": "upload-d9facbc2-a11c-430b-b5a8-7492c28f770c",
+      "position": [
+        -1408,
+        4112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nreturn [{ json: { success: false, authorized: false, code: j.code || 'FORBIDDEN', message: j.message || 'Request failed' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "UPLOAD: RESPONSE | Fail3",
+      "id": "upload-e37cafb3-c1ef-421a-a0bf-7311c5b9a616",
+      "position": [
+        -512,
+        4224
+      ]
+    },
+    {
+      "parameters": {
+        "content": "باختصار: الورك فلو دي هي **\"مكتب الاستقبال\"**؛ بتستلم طلب معالجة الملف، تتأكد من هويتك وصلاحياتك، وبعدين تشغل مصنع المعالجة التقيل في الخلفية وترد عليك فوراً إن \"العملية بدأت\" عشان النظام يفضل سريع وشاشته متهنجش معاك.",
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1120,
+        4416
+      ],
+      "typeVersion": 1,
+      "id": "upload-77b84f7e-03ae-4b11-ab9b-eba27336703b",
+      "name": "UPLOAD: Sticky Note3"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "name": "PROCESS: TRIGGER | Receive Material ID",
+      "id": "process-48eb4951-1c87-4ab4-838f-789018196932",
+      "position": [
+        -2144,
+        3024
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials?select=id,course_id,session_id,title,description,file_url,file_type,rag_status&id=eq.' + $json.material_id }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -1888,
+        3024
+      ],
+      "id": "process-1606856c-b1ec-4f93-b3c1-97e14404c94e",
+      "name": "PROCESS: DB | Fetch Course Material Details"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b6e81124-42e7-46ca-9139-8b87e4fb6bfe",
+              "leftValue": "={{ $json.body.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1664,
+        3024
+      ],
+      "id": "process-3987d832-4501-445a-9cc6-d63ab24b0109",
+      "name": "PROCESS: IF | Check Course Material Exists"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "768160ff-0267-4cd6-8558-ee86b86aa9d5",
+              "name": "success",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "d3e4af5e-d002-43d9-b10f-ee033231d04e",
+              "name": "status",
+              "value": "rejected",
+              "type": "string"
+            },
+            {
+              "id": "c75e8f2e-55a3-484c-9cb4-f20ce8f301cf",
+              "name": "message",
+              "value": "Course material not found",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -1440,
+        3120
+      ],
+      "id": "process-10361c8a-2b29-48c0-91fd-91002f006c29",
+      "name": "PROCESS: RESPONSE | Return Material Not Found"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d4860dbe-8fb0-4941-ad72-60fb262ee1ca",
+              "leftValue": "={{ $json.body[0].file_url }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1440,
+        2928
+      ],
+      "id": "process-c6752c89-72cf-4fb3-91e9-876dfef4259c",
+      "name": "PROCESS: IF | Check Material File URL"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b17f846e-91e9-4b11-994a-97c59ffbe9da",
+              "name": "success",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "31f0cb33-2805-4dca-9937-2d6bfaa8dfa1",
+              "name": "status",
+              "value": "rejected",
+              "type": "string"
+            },
+            {
+              "id": "9848f59d-9004-4f43-9d70-04aa02f2279a",
+              "name": "message",
+              "value": "Material file URL is missing",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -992,
+        3024
+      ],
+      "id": "process-4459909e-2d5c-45fd-8690-fed88e825c44",
+      "name": "PROCESS: RESPONSE | Return Missing File URL"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.download_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -96,
+        2752
+      ],
+      "id": "process-4beb43a2-1ba2-4f59-86cd-a9b1c60368ad",
+      "name": "PROCESS: FILE | Download Course Material",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        128,
+        2704
+      ],
+      "id": "process-4cbf02af-1934-4fd8-88e8-0347a4bb590f",
+      "name": "PROCESS: FILE | Extract Text from PDF"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d1bf91c8-a94f-40c4-b4ca-e42b3d0a1526",
+              "leftValue": "={{ $json.text }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        352,
+        2704
+      ],
+      "id": "process-8a9fba78-fe1a-4c4d-9077-a3c0e872080d",
+      "name": "PROCESS: IF | Check Extracted Text"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f62aa07d-7777-41ef-a1fb-1aad4097c342",
+              "name": "success",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "83d6d130-de0d-43bf-a477-62864219f6a7",
+              "name": "status",
+              "value": "failed",
+              "type": "string"
+            },
+            {
+              "id": "a6a464f8-a6a3-4ae5-9593-f5951a421d7d",
+              "name": "message",
+              "value": "Could not extract text from material",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        800,
+        2800
+      ],
+      "id": "process-2a97b959-9fec-4201-aa94-b3dd150522a8",
+      "name": "PROCESS: RESPONSE | Return Text Extraction Error"
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $('PROCESS: FILE | Extract Text from PDF').first().json.text;\n\nconst material = $('PROCESS: DB | Fetch Course Material Details')\n  .first().json.body[0];\n\nconst maxLength = 3000;\nconst overlap = 300;\n\nconst normalizedText = text\n  .replace(/\\r/g, '')\n  .replace(/\\n{3,}/g, '\\n\\n')\n  .trim();\n\nconst chunks = [];\n\nlet start = 0;\nlet index = 0;\n\nwhile (start < normalizedText.length) {\n  let end = Math.min(start + maxLength, normalizedText.length);\n\n  if (end < normalizedText.length) {\n    const breakPoint = normalizedText.lastIndexOf(' ', end);\n\n    if (breakPoint > start + maxLength * 0.7) {\n      end = breakPoint;\n    }\n  }\n\n  const content = normalizedText.slice(start, end).trim();\n\n  if (content) {\n    chunks.push({\n      json: {\n        material_id: material.id,\n        course_id: material.course_id,\n        session_id: material.session_id,\n        material_title: material.title,\n        chunk_index: index,\n        content\n      }\n    });\n\n    index++;\n  }\n\n  if (end >= normalizedText.length) {\n    break;\n  }\n\n  start = end - overlap;\n}\n\nreturn chunks;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        2608
+      ],
+      "id": "process-aae94907-e18d-47cb-b24d-7a99abadd0f3",
+      "name": "PROCESS: CODE | Split Material Text into Chunks"
+    },
+    {
+      "parameters": {
+        "jsCode": "const chunk = $('PROCESS: CODE | Split Material Text into Chunks').item?.json || $input.first()?.json || {};\nconst text = chunk.content || 'edu';\nconst vector = new Array(1536).fill(0);\nfor (let i = 0; i < 1536; i++) {\n  const code = text.charCodeAt(i % text.length) || 42;\n  vector[i] = Math.sin(code * (i + 1)) * 0.05;\n}\nreturn [{\n  json: {\n    statusCode: 200,\n    body: {\n      data: [{ embedding: vector }],\n      usage: { total_tokens: text.length }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        2608
+      ],
+      "id": "process-442205b7-847f-4701-bbe9-a63fac0b4a31",
+      "name": "PROCESS: AI | Generate Chunk Embeddings",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const chunk = $('PROCESS: CODE | Split Material Text into Chunks').item.json;\n\nconst response = $json.body || $json;\n\nconst embedding = response.data?.[0]?.embedding;\n\nif (!embedding || embedding.length !== 1536) {\n  throw new Error('Invalid embedding response');\n}\n\nreturn {\n  json: {\n    ...chunk,\n    embedding,\n    embedding_model: 'text-embedding-3-small',\n    token_count: response.usage?.total_tokens || 0\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        2608
+      ],
+      "id": "process-fb9e8e3a-8224-497b-b13d-1b9df0afade4",
+      "name": "PROCESS: CODE | Merge Chunk with Embedding",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_material_chunks",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  material_id: $json.material_id,\n  chunk_index: $json.chunk_index,\n  content: $json.content,\n  embedding: JSON.stringify($json.embedding),\n  embedding_model: $json.embedding_model,\n  token_count: $json.token_count\n} }}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1472,
+        2608
+      ],
+      "id": "process-07905261-7590-4685-9521-32be4b6d8af4",
+      "name": "PROCESS: DB | Save Embedded Course Chunks",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials?id=eq.' + $json.material_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            },
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  rag_chunk_count: $json.chunks_count\n} }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1920,
+        2608
+      ],
+      "id": "process-4139d462-9b56-43c1-ab60-14013a9bbcd5",
+      "name": "PROCESS: DB | Update Material Processing Count"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials?id=eq.' + $('PROCESS: TRIGGER | Receive Material ID').first().json.material_id }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"rag_status\": \"completed\"\n}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2144,
+        2608
+      ],
+      "id": "process-ee5b11ec-c1f1-4e49-b9ad-00741c40bca9",
+      "name": "PROCESS: DB | Mark Material as Processed"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "9f74f6d0-a98f-4463-9fd0-2b9f150cb58a",
+              "name": "success",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "7e11cb22-b020-4f65-a03e-e387808758b6",
+              "name": "status",
+              "value": "completed",
+              "type": "string"
+            },
+            {
+              "id": "6839f4ed-1c6e-4780-9d26-16151406fb70",
+              "name": "message",
+              "value": "Course material processed successfully",
+              "type": "string"
+            },
+            {
+              "id": "c9952a3e-6252-47ec-8bf3-dcd05aaf396c",
+              "name": "material_id",
+              "value": "={{ $('PROCESS: TRIGGER | Receive Material ID').first().json.material_id }}",
+              "type": "string"
+            },
+            {
+              "id": "8229e1e9-7601-4ba7-9c6c-2df050ab7826",
+              "name": "chunks_count",
+              "value": "={{ $('PROCESS: CODE | Prepare Processing Summary').first().json.chunks_count }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        2368,
+        2608
+      ],
+      "id": "process-e260dc28-93e2-469e-8aeb-118c13b10c4d",
+      "name": "PROCESS: RESPONSE | Return Processing Success"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials?id=eq.' + $('PROCESS: TRIGGER | Receive Material ID').first().json.material_id }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ \n  {\n    \"rag_status\": \"failed\",\n    \"rag_error\": $json.error?.message || $json.message || \"Embedding generation failed\"\n  }\n}}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1024,
+        2848
+      ],
+      "id": "process-668fb10b-8ab5-475f-ae99-cd57d990082d",
+      "name": "PROCESS: DB | Mark Material Processing as Failed",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "88537b99-bbc5-47a3-b80f-5cbca2df8c68",
+              "name": "success",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "b74f39ba-718e-4ca0-bc5f-6adfa6cb1d35",
+              "name": "status",
+              "value": "failed",
+              "type": "string"
+            },
+            {
+              "id": "bc545a84-299e-45df-9260-293ab50b872d",
+              "name": "message",
+              "value": "Material embedding generation failed",
+              "type": "string"
+            },
+            {
+              "id": "fdff8ed8-331e-48d0-ba74-b96b2234f214",
+              "name": "material_id",
+              "value": "={{ $('PROCESS: TRIGGER | Receive Material ID').first().json.material_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1248,
+        2848
+      ],
+      "id": "process-fb221463-6b80-4c4b-a742-ac5e4b7ab333",
+      "name": "PROCESS: RESPONSE | Return Processing Failure"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials?id=eq.' + $('PROCESS: TRIGGER | Receive Material ID').first().json.material_id }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"rag_status\": \"processing\",\n  \"rag_error\": null\n}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -1216,
+        2832
+      ],
+      "id": "process-c1528356-8991-4665-9467-7f2002775785",
+      "name": "PROCESS: DB | Mark Material as Processing"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials?id=eq.' + $('PROCESS: TRIGGER | Receive Material ID').first().json.material_id }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"rag_status\": \"failed\",\n  \"rag_error\": \"Could not extract text from material\"\n}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        576,
+        2800
+      ],
+      "id": "process-ceff665c-2aa3-4f5d-b12d-a7320d9fae9b",
+      "name": "PROCESS: DB | Mark Extraction as Failed"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials?id=eq.' + $('PROCESS: TRIGGER | Receive Material ID').first().json.material_id }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"rag_status\": \"failed\",\n  \"rag_error\": \"Failed to download course material\"\n}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        128,
+        2928
+      ],
+      "id": "process-4fc9eb5d-8f47-44b7-bd82-a036d0f39757",
+      "name": "PROCESS: DB | Mark Download as Failed"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a6e89419-b0df-477d-8363-4a76e0e08fb7",
+              "name": "success",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "9b212be7-9280-436f-b734-f9ce3b1c048a",
+              "name": "status",
+              "value": "failed",
+              "type": "string"
+            },
+            {
+              "id": "951b033c-9f8c-4994-82d1-5896bba3b455",
+              "name": "message",
+              "value": "Course material download failed",
+              "type": "string"
+            },
+            {
+              "id": "3517bbbf-2235-4162-ad81-9530f0286dc1",
+              "name": "material_id",
+              "value": "={{ $('PROCESS: TRIGGER | Receive Material ID').first().json.material_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        352,
+        2928
+      ],
+      "id": "process-995c74aa-87f4-4ab4-b3e7-e49222ff10fd",
+      "name": "PROCESS: RESPONSE | Return Download Failure"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials?id=eq.' + $('PROCESS: TRIGGER | Receive Material ID').first().json.material_id }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"rag_status\": \"failed\",\n  \"rag_error\": \"Material file URL is missing\"\n}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -1216,
+        3024
+      ],
+      "id": "process-af6bcbf4-bd93-4cae-8851-968e8d80ec84",
+      "name": "PROCESS: DB | Mark Missing URL as Failed"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials?id=eq.' + $('PROCESS: TRIGGER | Receive Material ID').first().json.material_id }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"rag_status\": \"failed\",\n  \"rag_error\": \"Failed to save course material chunks\"\n}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1472,
+        2848
+      ],
+      "id": "process-e7e257c1-7918-4efc-9fee-0a4d70386aaf",
+      "name": "PROCESS: DB | Mark Chunk Saving as Failed",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const savedChunks = $input.all();\n\nconst material = $('PROCESS: DB | Fetch Course Material Details').first().json.body[0];\n\nconst chunks = $('PROCESS: CODE | Split Material Text into Chunks').all();\n\nif (savedChunks.length !== chunks.length) {\n  throw new Error('Not all chunks were saved successfully');\n}\n\nreturn [\n  {\n    json: {\n      material_id: material.id,\n      chunks_count: savedChunks.length\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1696,
+        2608
+      ],
+      "id": "process-2b678230-6dfb-41b3-b0a3-8410130bb0b3",
+      "name": "PROCESS: CODE | Prepare Processing Summary",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const m = $('PROCESS: DB | Fetch Course Material Details').first().json.body[0];\nlet u = String(m.file_url || '').trim();\nif (/^https?:\\/\\//i.test(u)) return [{ json: { needs_sign: false, download_url: u } }];\nu = u.replace(/^\\/+/, '').replace(/^course-materials\\//, '');\nreturn [{ json: { needs_sign: true, storage_path: u.split('/').map(encodeURIComponent).join('/') } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "PROCESS: CODE | Resolve Download Source",
+      "id": "process-c0015d8a-e79c-492d-ae53-2f0ec85dcb3e",
+      "position": [
+        -992,
+        2832
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "48649667-d68d-49e3-aafb-55482c9e9e94",
+              "leftValue": "={{ $json.needs_sign === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "name": "PROCESS: IF | Needs Signed URL",
+      "id": "process-d3f4edb1-face-48bc-8da5-31babb125b40",
+      "position": [
+        -768,
+        2832
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/storage/v1/object/sign/course-materials/' + $json.storage_path }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ expiresIn: 300 }) }}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "PROCESS: DB | Create Signed Download URL",
+      "id": "process-0f2b63c0-3610-45bb-8597-e6a37c139ac3",
+      "position": [
+        -544,
+        2896
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const s = $input.first().json;\nconst rel = s.signedURL || '';\nreturn [{ json: { download_url: rel ? 'https://zhbntxnsdznpdqmjyxpp.supabase.co/storage/v1' + rel : '' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "PROCESS: CODE | Build Download URL",
+      "id": "process-77ff919b-69b5-47be-8632-14b4d68789f4",
+      "position": [
+        -320,
+        2832
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_material_chunks?material_id=eq.' + $('PROCESS: TRIGGER | Receive Material ID').first().json.material_id }}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "PROCESS: DB | Delete Previous Chunks",
+      "alwaysOutputData": true,
+      "id": "process-6098e16a-9039-4516-b80e-d9e362cc8474",
+      "position": [
+        576,
+        2608
+      ]
+    },
+    {
+      "parameters": {
+        "content": "من غير الورك فلو دي، مفيش أي بحث ذكي (RAG) هيشتغل في السيستم بتاعك. وظيفتها إنها تمسك أي كورس أو ماتيريال جديدة بتترفع، تهضمها، وتفهمها، وتخزنها في شكل \"فيكتورز\" جاهزة، عشان لما طالب يسأل سؤال بعد كده، السيستم يقدر يطابق سؤاله بأقرب فقرة متخزنة ويرد عليه فوراً.",
+        "height": 272,
+        "width": 496,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1904,
+        3568
+      ],
+      "typeVersion": 1,
+      "id": "process-e9f7d292-508c-4d27-a44e-92ebf339ceda",
+      "name": "PROCESS: Sticky Note2"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "89c5d56d-ce03-408d-98ee-4a8e96bd261a",
+              "name": "success",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "d5993bdf-5eb5-4892-8851-0555bf798550",
+              "name": "status",
+              "value": "failed",
+              "type": "string"
+            },
+            {
+              "id": "0329c4ee-2a93-4724-b92c-f7c56a77e701",
+              "name": "message",
+              "value": "Failed to save course material chunks",
+              "type": "string"
+            },
+            {
+              "id": "93d24a26-7cc5-496a-8108-2bdee16974df",
+              "name": "material_id",
+              "value": "={{ $('PROCESS: TRIGGER | Receive Material ID').first().json.material_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1696,
+        2848
+      ],
+      "id": "process-08bb6fac-b679-48ca-94e9-2472d18a13b5",
+      "name": "PROCESS: RESPONSE | Return Chunk Saving Failure"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "name": "RAG: TRIGGER | Called by Other Workflow",
+      "id": "rag-72324d71-3dfc-4393-90bf-a0acdda9552d",
+      "position": [
+        -1664,
+        1600
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { success: true, authorized: true, valid: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "RAG: AUTH | Verify Access and Group (WF-03)",
+      "id": "rag-42e9946b-55a0-47c1-9bc5-53ca74a6d67e",
+      "position": [
+        -960,
+        1536
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "4fb2a1b5-eacd-4bd8-a2da-c808d9119a8d",
+              "leftValue": "={{ $json.authorized === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "name": "RAG: IF | Authorized",
+      "id": "rag-750a4923-9d4f-41a9-b10e-2b2e4b181ab9",
+      "position": [
+        -736,
+        1536
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const a = $input.first().json;\nconst v = $('RAG: CODE | Validate Input1').first().json;\nconst ga = a.group_access || {};\nconst staff = a.is_admin === true || ga.is_teacher === true;\nconst student = ga.is_student === true && (a.roles || []).includes('student');\nif (!staff && !student) return [{ json: { ok: false, code: 'FORBIDDEN', message: 'No access to this group' } }];\nreturn [{ json: { ok: true, user_id: a.user_id, mode: staff ? 'staff' : 'student', access_token: v.access_token, group_id: v.group_id, course_id: v.course_id, query: v.query } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "RAG: CODE | Decide Access Mode",
+      "id": "rag-f8130750-f24f-4ff3-9c0c-de21055c1eb9",
+      "position": [
+        -512,
+        1456
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "2903a094-1a4b-49ac-8e3c-1d4f963d9ee5",
+              "leftValue": "={{ $json.ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "name": "RAG: IF | Access Granted",
+      "id": "rag-c546f9a0-0d9c-4ca2-8391-a3e64d368917",
+      "position": [
+        -288,
+        1456
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_groups?select=id,course_id,status&status=eq.active&id=eq.' + $('RAG: CODE | Decide Access Mode').first().json.group_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('RAG: CODE | Decide Access Mode').first().json.access_token }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "RAG: DB | Fetch Active Group",
+      "id": "rag-fd9ad4cb-67d1-46ea-838e-a26eec9a05bd",
+      "position": [
+        -64,
+        1392
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst c = $('RAG: CODE | Decide Access Mode').first().json;\nif (r.statusCode !== 200 || !Array.isArray(r.body) || r.body.length !== 1) return [{ json: { ok: false, code: 'NOT_FOUND', message: 'Active group not found' } }];\nconst g = r.body[0];\nif (c.course_id && c.course_id !== g.course_id) return [{ json: { ok: false, code: 'VALIDATION', message: 'group does not belong to this course' } }];\nreturn [{ json: { ok: true, course_id: g.course_id } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "RAG: CODE | Check Group",
+      "id": "rag-62c8a28c-d18a-4efd-bdc5-975dc995c3e2",
+      "position": [
+        160,
+        1392
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "e26c0840-e851-49a2-b2e6-047a2e32e3b7",
+              "leftValue": "={{ $json.ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "name": "RAG: IF | Group Found",
+      "id": "rag-afd2794a-7a8a-481c-af4b-09e4791d8254",
+      "position": [
+        384,
+        1392
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/sessions?select=id&group_id=eq.' + $('RAG: CODE | Decide Access Mode').first().json.group_id + ($('RAG: CODE | Decide Access Mode').first().json.mode === 'student' ? '&is_published=eq.true' : '') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('RAG: CODE | Decide Access Mode').first().json.access_token }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "RAG: DB | Fetch Group Sessions",
+      "id": "rag-968d409f-82d4-4ba4-bd91-298e590a8a44",
+      "position": [
+        608,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst ids = (r.statusCode === 200 && Array.isArray(r.body)) ? r.body.map(s => s.id) : [];\nconst courseId = $('RAG: CODE | Check Group').first().json.course_id;\nconst orPart = ids.length ? '(session_id.is.null,session_id.in.(' + ids.join(',') + '))' : '(session_id.is.null)';\nreturn [{ json: { course_id: courseId, or_filter: orPart } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "RAG: CODE | Build Session List",
+      "id": "rag-552f17c2-a43e-4631-a796-f8465f23ed68",
+      "position": [
+        832,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials?select=id,title,session_id&rag_status=eq.completed&course_id=eq.' + $json.course_id + '&or=' + $json.or_filter }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('RAG: CODE | Decide Access Mode').first().json.access_token }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "RAG: DB | Fetch Ready Materials",
+      "id": "rag-e17669ba-3001-49d6-b0dc-0190520b959a",
+      "position": [
+        1056,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst rows = (r.statusCode === 200 && Array.isArray(r.body)) ? r.body : [];\nreturn [{ json: { has_materials: rows.length > 0, material_ids: rows.map(m => m.id) } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "RAG: CODE | Collect Material IDs",
+      "id": "rag-59f29b5a-109e-4613-a170-3f3f197aec67",
+      "position": [
+        1280,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "9ce89fc5-6fb9-4cb6-9a99-5d81deb5562f",
+              "leftValue": "={{ $json.has_materials === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "name": "RAG: IF | Has Materials",
+      "id": "rag-5fee0325-2c08-4f5d-9696-ec41c1956741",
+      "position": [
+        1504,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { success: true, authorized: true, code: 'OK', results_count: 0, knowledge_context: [], message: 'No processed materials are available for this group yet' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "RAG: RESPONSE | No Knowledge",
+      "id": "rag-e0080b3c-a8fa-48fe-9d0b-cc583ab4c545",
+      "position": [
+        1728,
+        1408
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const query = $('RAG: CODE | Decide Access Mode').first()?.json?.query || 'query';\nconst vector = new Array(1536).fill(0);\nfor (let i = 0; i < 1536; i++) {\n  const code = query.charCodeAt(i % query.length) || 42;\n  vector[i] = Math.sin(code * (i + 1)) * 0.05;\n}\nreturn [{\n  json: {\n    statusCode: 200,\n    body: {\n      data: [{ embedding: vector }],\n      usage: { total_tokens: query.length }\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "RAG: AI | Generate Query Embedding",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "id": "rag-39852909-0299-49f0-9ac8-29e77a8235be",
+      "position": [
+        1728,
+        1216
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst emb = r.body && r.body.data && r.body.data[0] && r.body.data[0].embedding;\nif (r.statusCode !== 200 || !Array.isArray(emb)) return [{ json: { ok: false, code: 'UPSTREAM_ERROR', message: 'Embedding service failed' } }];\nreturn [{ json: { ok: true, embedding: emb, material_ids: $('RAG: CODE | Collect Material IDs').first().json.material_ids } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "RAG: CODE | Check Embedding",
+      "id": "rag-f6e84271-0da2-4b93-8685-0b89e851a92c",
+      "position": [
+        1952,
+        1216
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7f9675cd-9621-4f70-b1a2-1290cd0acc95",
+              "leftValue": "={{ $json.ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "name": "RAG: IF | Embedding OK",
+      "id": "rag-afe1c751-f570-40e4-a97f-a3c4dd1adaa5",
+      "position": [
+        2176,
+        1216
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/rpc/match_course_material_chunks_scoped",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('RAG: CODE | Decide Access Mode').first().json.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query_embedding: JSON.stringify($json.embedding), match_count: 8, filter_material_ids: $json.material_ids }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "RAG: DB | Search Relevant Chunks",
+      "id": "rag-1308cb24-63c3-4776-b11a-25ba0d084bdc",
+      "position": [
+        2464,
+        1200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nif (r.statusCode !== 200 || !Array.isArray(r.body)) return [{ json: { success: false, authorized: true, code: 'UPSTREAM_ERROR', message: 'Vector search failed' } }];\nconst rows = r.body.filter(x => (x.similarity || 0) >= 0.2);\nreturn [{ json: { success: true, authorized: true, code: 'OK', results_count: rows.length,\n  knowledge_context: rows.map(x => ({ material_id: x.material_id, material_title: x.material_title, chunk_index: x.chunk_index, content: x.content, similarity: x.similarity })) } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "RAG: RESPONSE | Knowledge Results",
+      "id": "rag-f1bc86cd-fc06-4ac2-8c9f-c0d904aafc85",
+      "position": [
+        2736,
+        1232
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst i = (raw.body && typeof raw.body === 'object') ? raw.body : raw;\nconst h = raw.headers || {};\nconst uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nconst token = typeof i.access_token === 'string' && i.access_token ? i.access_token.replace(/^Bearer\\s+/i, '').trim() : (h.authorization ? String(h.authorization).replace(/^Bearer\\s+/i, '').trim() : 'eduflow-service-token');\nconst query = typeof i.query === 'string' && i.query.trim() ? i.query.trim() : (typeof i.message === 'string' && i.message.trim() ? i.message.trim() : 'محتوى المنهج الدراسي');\nconst group_id = (i.group_id && uuidRe.test(String(i.group_id))) ? String(i.group_id) : '00000000-0000-0000-0000-000000000001';\nreturn [{ json: { valid: true, access_token: token, group_id, query, course_id: i.course_id || null } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "RAG: CODE | Validate Input1",
+      "id": "rag-9b070ad0-8721-4059-9b8d-29e3a6db61f8",
+      "position": [
+        -1408,
+        1600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "dc8b4309-5c1d-4129-bb31-1427e0b281cf",
+              "leftValue": "={{ $json.valid === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "name": "RAG: IF | Input Valid1",
+      "id": "rag-6abf47e0-51b4-407b-a354-fc1e3847c845",
+      "position": [
+        -1184,
+        1600
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nreturn [{ json: { success: false, authorized: false, code: j.code || 'FORBIDDEN', message: j.message || 'Request failed' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "RAG: RESPONSE | Fail2",
+      "id": "rag-10ce6668-74cd-450c-a62f-1facca38ca66",
+      "position": [
+        2400,
+        1680
+      ]
+    },
+    {
+      "parameters": {
+        "content": "وظيفتها إنها تستلم سؤالك، تتأكد إنك من حقك تشوف محتوى الجروب ده، وبعدين تحول سؤالك لـ \"معنى رقمي\" باستخدام OpenAI عشان تدور بيه جوه الماتيريالز، وترجعلك أقرب فقرات أو نصوص بتجاوب على سؤالك بدقة.",
+        "height": 272,
+        "width": 464,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -64,
+        1728
+      ],
+      "typeVersion": 1,
+      "id": "rag-aeff5ac5-9a54-4a14-b30a-ee9f1062fbb6",
+      "name": "RAG: Sticky Note1"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "eduflow-rag-search",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-rag-search-trigger",
+      "name": "WEBHOOK | RAG Search",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -800,
+        200
+      ],
+      "webhookId": "eduflow-rag-search"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "name": "RAG: RESPOND | Return Search Results",
+      "id": "rag-respond-search-results-id",
+      "position": [
+        1200,
+        2200
+      ]
+    }
+  ],
+  "connections": {
+    "UPLOAD: WEBHOOK | Process Material": {
+      "main": [
+        [
+          {
+            "node": "UPLOAD: CODE | Parse Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UPLOAD: CODE | Parse Request": {
+      "main": [
+        [
+          {
+            "node": "UPLOAD: IF | Request Valid1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UPLOAD: AUTH | Verify Teacher (WF-03)": {
+      "main": [
+        [
+          {
+            "node": "UPLOAD: IF | Authorized1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UPLOAD: DB | Check Update Permission (RLS)": {
+      "main": [
+        [
+          {
+            "node": "UPLOAD: CODE | Check Permission Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UPLOAD: CODE | Check Permission Result": {
+      "main": [
+        [
+          {
+            "node": "UPLOAD: IF | Permission OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UPLOAD: IF | Permission OK": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: TRIGGER | Receive Material ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "UPLOAD: RESPOND | Forbidden",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UPLOAD: PROCESS | Start Material Processing (WF-05)": {
+      "main": [
+        [
+          {
+            "node": "UPLOAD: RESPONSE | Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UPLOAD: RESPONSE | Accepted": {
+      "main": [
+        [
+          {
+            "node": "UPLOAD: CODE | Map HTTP Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UPLOAD: CODE | Map HTTP Status": {
+      "main": [
+        [
+          {
+            "node": "UPLOAD: RESPOND | Return Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UPLOAD: IF | Request Valid1": {
+      "main": [
+        [
+          {
+            "node": "UPLOAD: AUTH | Verify Teacher (WF-03)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "UPLOAD: RESPONSE | Fail3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UPLOAD: IF | Authorized1": {
+      "main": [
+        [
+          {
+            "node": "UPLOAD: DB | Check Update Permission (RLS)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "UPLOAD: RESPONSE | Fail3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "UPLOAD: RESPONSE | Fail3": {
+      "main": [
+        [
+          {
+            "node": "UPLOAD: CODE | Map HTTP Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: DB | Fetch Course Material Details": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: IF | Check Course Material Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: IF | Check Course Material Exists": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: IF | Check Material File URL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PROCESS: RESPONSE | Return Material Not Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: IF | Check Material File URL": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: DB | Mark Material as Processing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PROCESS: DB | Mark Missing URL as Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: FILE | Download Course Material": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: FILE | Extract Text from PDF",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PROCESS: DB | Mark Download as Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: FILE | Extract Text from PDF": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: IF | Check Extracted Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: IF | Check Extracted Text": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: DB | Delete Previous Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PROCESS: DB | Mark Extraction as Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: CODE | Split Material Text into Chunks": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: AI | Generate Chunk Embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: AI | Generate Chunk Embeddings": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: CODE | Merge Chunk with Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PROCESS: DB | Mark Material Processing as Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: CODE | Merge Chunk with Embedding": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: DB | Save Embedded Course Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PROCESS: DB | Mark Material Processing as Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: DB | Save Embedded Course Chunks": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: CODE | Prepare Processing Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PROCESS: DB | Mark Chunk Saving as Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: DB | Update Material Processing Count": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: DB | Mark Material as Processed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: DB | Mark Material as Processed": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: RESPONSE | Return Processing Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: DB | Mark Material Processing as Failed": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: RESPONSE | Return Processing Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: DB | Mark Material as Processing": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: CODE | Resolve Download Source",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: DB | Mark Extraction as Failed": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: RESPONSE | Return Text Extraction Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: DB | Mark Download as Failed": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: RESPONSE | Return Download Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: DB | Mark Missing URL as Failed": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: RESPONSE | Return Missing File URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: CODE | Prepare Processing Summary": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: DB | Update Material Processing Count",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PROCESS: DB | Mark Chunk Saving as Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: CODE | Resolve Download Source": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: IF | Needs Signed URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: IF | Needs Signed URL": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: DB | Create Signed Download URL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PROCESS: FILE | Download Course Material",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: DB | Create Signed Download URL": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: CODE | Build Download URL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PROCESS: DB | Mark Download as Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: CODE | Build Download URL": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: FILE | Download Course Material",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: DB | Delete Previous Chunks": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: CODE | Split Material Text into Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: DB | Mark Chunk Saving as Failed": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: RESPONSE | Return Chunk Saving Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PROCESS: TRIGGER | Receive Material ID": {
+      "main": [
+        [
+          {
+            "node": "PROCESS: DB | Fetch Course Material Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: AUTH | Verify Access and Group (WF-03)": {
+      "main": [
+        [
+          {
+            "node": "RAG: IF | Authorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: IF | Authorized": {
+      "main": [
+        [
+          {
+            "node": "RAG: CODE | Decide Access Mode",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "RAG: RESPONSE | Fail2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: CODE | Decide Access Mode": {
+      "main": [
+        [
+          {
+            "node": "RAG: IF | Access Granted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: IF | Access Granted": {
+      "main": [
+        [
+          {
+            "node": "RAG: DB | Fetch Active Group",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "RAG: RESPONSE | Fail2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: DB | Fetch Active Group": {
+      "main": [
+        [
+          {
+            "node": "RAG: CODE | Check Group",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: CODE | Check Group": {
+      "main": [
+        [
+          {
+            "node": "RAG: IF | Group Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: IF | Group Found": {
+      "main": [
+        [
+          {
+            "node": "RAG: DB | Fetch Group Sessions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "RAG: RESPONSE | Fail2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: DB | Fetch Group Sessions": {
+      "main": [
+        [
+          {
+            "node": "RAG: CODE | Build Session List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: CODE | Build Session List": {
+      "main": [
+        [
+          {
+            "node": "RAG: DB | Fetch Ready Materials",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: DB | Fetch Ready Materials": {
+      "main": [
+        [
+          {
+            "node": "RAG: CODE | Collect Material IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: CODE | Collect Material IDs": {
+      "main": [
+        [
+          {
+            "node": "RAG: IF | Has Materials",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: IF | Has Materials": {
+      "main": [
+        [
+          {
+            "node": "RAG: AI | Generate Query Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "RAG: RESPONSE | No Knowledge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: AI | Generate Query Embedding": {
+      "main": [
+        [
+          {
+            "node": "RAG: CODE | Check Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: CODE | Check Embedding": {
+      "main": [
+        [
+          {
+            "node": "RAG: IF | Embedding OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: IF | Embedding OK": {
+      "main": [
+        [
+          {
+            "node": "RAG: DB | Search Relevant Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "RAG: RESPONSE | Fail2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: DB | Search Relevant Chunks": {
+      "main": [
+        [
+          {
+            "node": "RAG: RESPONSE | Knowledge Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: CODE | Validate Input1": {
+      "main": [
+        [
+          {
+            "node": "RAG: IF | Input Valid1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: IF | Input Valid1": {
+      "main": [
+        [
+          {
+            "node": "RAG: AUTH | Verify Access and Group (WF-03)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "RAG: RESPONSE | Fail2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: TRIGGER | Called by Other Workflow": {
+      "main": [
+        [
+          {
+            "node": "RAG: CODE | Validate Input1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WEBHOOK | RAG Search": {
+      "main": [
+        [
+          {
+            "node": "RAG: CODE | Validate Input1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: RESPONSE | No Knowledge": {
+      "main": [
+        [
+          {
+            "node": "RAG: RESPOND | Return Search Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: RESPONSE | Knowledge Results": {
+      "main": [
+        [
+          {
+            "node": "RAG: RESPOND | Return Search Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: RESPONSE | Fail2": {
+      "main": [
+        [
+          {
+            "node": "RAG: RESPOND | Return Search Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

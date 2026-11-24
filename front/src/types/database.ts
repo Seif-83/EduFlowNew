@@ -31,6 +31,7 @@ export interface CourseGroup {
   course_id: string;
   teacher_id: string;
   name: string;
+  schedule_time?: string;
   start_date?: string;
   end_date?: string;
   status: 'active' | 'completed' | 'cancelled';
@@ -38,6 +39,7 @@ export interface CourseGroup {
   course_title?: string;
   teacher_name?: string;
   active_students?: number;
+  max_students?: number;
 }
 
 export interface Enrollment {

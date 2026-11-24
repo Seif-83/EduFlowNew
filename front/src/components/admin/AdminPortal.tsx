@@ -16,17 +16,36 @@ import {
   Filter,
   Send,
   Zap,
+  Bot,
+  BookOpen,
+  FileText,
+  Bell,
 } from 'lucide-react';
 import { Profile, StudentPayment } from '../../types/database';
 import { db } from '../../services/mockDatabase';
-import { sendN8nEvent } from '../../services/n8nService';
+import {
+  sendN8nEvent,
+  callStudentWorkflow,
+  callAuditWorkflow,
+  callAuthWorkflow,
+  callAgentChatWorkflow,
+  callRagSearchWorkflow,
+  callExamsWorkflow,
+  callNotificationsWorkflow,
+} from '../../services/n8nService';
 
 interface AdminPortalProps {
   currentAdmin: Profile;
 }
 
 export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'billing' | 'teachers' | 'complaints' | 'automation'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'billing' | 'teachers' | 'complaints' | 'automation'>(
+    () => (localStorage.getItem('eduflow_admin_tab') as any) || 'overview'
+  );
+
+  React.useEffect(() => {
+    localStorage.setItem('eduflow_admin_tab', activeTab);
+  }, [activeTab]);
 
   // Search & filter
   const [userSearch, setUserSearch] = useState('');
@@ -126,6 +145,151 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
   };
 
   // Trigger Automation Test
+  const [testingWorkflow, setTestingWorkflow] = useState<string | null>(null);
+
+  const handleTestStudentWorkflow = async () => {
+    setTestingWorkflow('students');
+    db.addAutomationLog({
+      trigger_name: 'SW-08: Student Management (Search Test)',
+      source: 'n8n',
+      payload_summary: 'إرسال استعلام بحث بالاسم "Ahmed" إلى ورك فلو إدارة الطلاب n8n',
+      status: 'success',
+    });
+    const res = await callStudentWorkflow('student.search', { search: 'Ahmed', limit: 5 });
+    setAutomationLogs(db.getAutomationLogs());
+    setAutoSimMsg(
+      res.success
+        ? '✅ تم استلام رد ناجح من ورك فلو إدارة الطلاب (SW-08)!'
+        : '⚠️ تم إرسال الطلب لـ n8n (تأكد من تشغيل n8n أو وضع الاختبار): ' + (res.error || '')
+    );
+    setTestingWorkflow(null);
+    setTimeout(() => setAutoSimMsg(''), 5000);
+  };
+
+  const handleTestAuditWorkflow = async () => {
+    setTestingWorkflow('audit');
+    db.addAutomationLog({
+      trigger_name: 'SW-06: Audit Logging Test',
+      source: 'n8n',
+      payload_summary: 'تسجيل حدث تدقيق جديد عبر ورك فلو Audit Logging في Supabase',
+      status: 'success',
+    });
+    const isUuid = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(val);
+    const res = await callAuditWorkflow({
+      action: 'audit.admin_health_check',
+      entity_type: 'system',
+      actor_id: isUuid(currentAdmin.id) ? currentAdmin.id : null,
+      actor_role: 'admin',
+      details: { admin_username: currentAdmin.full_name, checked_at: new Date().toISOString() },
+    });
+    setAutomationLogs(db.getAutomationLogs());
+    setAutoSimMsg(
+      res.success
+        ? '✅ تم تسجيل حدث التدقيق بنجاح في Supabase عبر n8n (SW-06)!'
+        : '⚠️ تم إرسال الطلب لـ n8n (تأكد من تشغيل n8n): ' + (res.error || '')
+    );
+    setTestingWorkflow(null);
+    setTimeout(() => setAutoSimMsg(''), 5000);
+  };
+
+  const handleTestAuthWorkflow = async () => {
+    setTestingWorkflow('auth');
+    db.addAutomationLog({
+      trigger_name: 'WF-03: Auth & Access Control Check',
+      source: 'n8n',
+      payload_summary: 'فحص صلاحيات الوصول ورتبة الحساب عبر ورك فلو Auth & Access',
+      status: 'success',
+    });
+    const res = await callAuthWorkflow({
+      access_token: 'test_token',
+      required_roles: ['admin'],
+    });
+    setAutomationLogs(db.getAutomationLogs());
+    setAutoSimMsg(
+      res.success
+        ? '✅ تم فحص الصلاحيات والتوثيق بنجاح عبر n8n (WF-03)!'
+        : '⚠️ تم إرسال الطلب لـ n8n: ' + (res.error || '')
+    );
+    setTestingWorkflow(null);
+    setTimeout(() => setAutoSimMsg(''), 5000);
+  };
+
+  const handleTestAgentChatWorkflow = async () => {
+    setTestingWorkflow('agent-chat');
+    db.addAutomationLog({
+      trigger_name: 'AI-Agents: Multi-Persona Hub (Student Chat)',
+      source: 'n8n',
+      payload_summary: 'إرسال سؤال للمساعد الذكي متعدد الأدوار عبر n8n',
+      status: 'success',
+    });
+    const res = await callAgentChatWorkflow('student', 'ما هي قوانين الحركة الأساسية؟');
+    setAutomationLogs(db.getAutomationLogs());
+    setAutoSimMsg(
+      res.success
+        ? '✅ تم استلام رد ناجح من ورك فلو المساعد الذكي متعدد الأدوار (AI Agents Hub)!'
+        : '⚠️ تم إرسال الطلب لـ n8n: ' + (res.error || '')
+    );
+    setTestingWorkflow(null);
+    setTimeout(() => setAutoSimMsg(''), 5000);
+  };
+
+  const handleTestRagWorkflow = async () => {
+    setTestingWorkflow('rag');
+    db.addAutomationLog({
+      trigger_name: 'RAG: Semantic Curriculum Search',
+      source: 'n8n',
+      payload_summary: 'بحث دلالي ذكي في مذكرات المنهج عبر ورك فلو Material & RAG Hub',
+      status: 'success',
+    });
+    const res = await callRagSearchWorkflow('قوانين الضغط والغازات');
+    setAutomationLogs(db.getAutomationLogs());
+    setAutoSimMsg(
+      res.success
+        ? '✅ تم استلام نتائج البحث الدلالي بنجاح من ورك فلو RAG Hub!'
+        : '⚠️ تم إرسال الطلب لـ n8n: ' + (res.error || '')
+    );
+    setTestingWorkflow(null);
+    setTimeout(() => setAutoSimMsg(''), 5000);
+  };
+
+  const handleTestExamsHub = async () => {
+    setTestingWorkflow('exams');
+    db.addAutomationLog({
+      trigger_name: 'Exams: Assessment Draft Creation',
+      source: 'n8n',
+      payload_summary: 'توليد مسودة اختبار تفاعلي عبر ورك فلو Exams & Assessment Hub',
+      status: 'success',
+    });
+    const res = await callExamsWorkflow('exam.create_draft', { title: 'اختبار تجريبي' });
+    setAutomationLogs(db.getAutomationLogs());
+    setAutoSimMsg(
+      res.success
+        ? '✅ تم استدعاء مسار الامتحانات والتقييم بنجاح عبر n8n!'
+        : '⚠️ تم إرسال الطلب لـ n8n: ' + (res.error || '')
+    );
+    setTestingWorkflow(null);
+    setTimeout(() => setAutoSimMsg(''), 5000);
+  };
+
+  const handleTestNotificationsHub = async () => {
+    setTestingWorkflow('notify');
+    db.addAutomationLog({
+      trigger_name: 'Notifications: On-Demand Dispatch',
+      source: 'n8n',
+      payload_summary: 'إرسال تنبيه فوري عبر ورك فلو Notifications & Reports Hub',
+      status: 'success',
+    });
+    const res = await callNotificationsWorkflow({ title: 'تنبيه تجريبي', message: 'فحص دورة الإشعارات' });
+    setAutomationLogs(db.getAutomationLogs());
+    setAutoSimMsg(
+      res.success
+        ? '✅ تم إرسال الإشعار بنجاح عبر ورك فلو Notifications Hub!'
+        : '⚠️ تم إرسال الطلب لـ n8n: ' + (res.error || '')
+    );
+    setTestingWorkflow(null);
+    setTimeout(() => setAutoSimMsg(''), 5000);
+  };
+
   const handleSimulateWebhook = () => {
     db.addAutomationLog({
       trigger_name: 'Test Webhook: n8n Pipeline Sync & Report Run',
@@ -819,23 +983,271 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
       {/* TAB 6: Automation & n8n */}
       {activeTab === 'automation' && (
         <div className="space-y-6">
+          {/* Active Workflows Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Workflow 1: Student Management */}
+            <div className="bg-white border-2 border-slate-200 rounded-3xl p-5 shadow-sm space-y-3 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl font-bold">
+                  👨‍🎓
+                </span>
+                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  Webhook جاهز 🟢
+                </span>
+              </div>
+              <div>
+                <h4 className="font-black text-slate-900 text-sm">EduFlow – Student Management</h4>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  كود: <code className="bg-slate-100 text-slate-700 px-1 rounded">SW-08</code> • إنشاء، تحديث، وبحث الطلاب والتسجيل
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2 rounded-xl text-[10px] text-slate-600 font-mono break-all border border-slate-200">
+                POST /webhook/eduflow-students
+              </div>
+              <button
+                onClick={handleTestStudentWorkflow}
+                disabled={testingWorkflow === 'students'}
+                className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                {testingWorkflow === 'students' ? (
+                  <span>جاري الفحص...</span>
+                ) : (
+                  <>
+                    <Search className="w-3.5 h-3.5" />
+                    <span>اختبار استعلام وبحث طالب</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Workflow 2: Audit Logging */}
+            <div className="bg-white border-2 border-slate-200 rounded-3xl p-5 shadow-sm space-y-3 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl font-bold">
+                  🛡️
+                </span>
+                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  Webhook جاهز 🟢
+                </span>
+              </div>
+              <div>
+                <h4 className="font-black text-slate-900 text-sm">EduFlow - Audit Logging</h4>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  كود: <code className="bg-slate-100 text-slate-700 px-1 rounded">SW-06</code> • توثيق كافة الأحداث والعمليات في Supabase
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2 rounded-xl text-[10px] text-slate-600 font-mono break-all border border-slate-200">
+                POST /webhook/eduflow-audit
+              </div>
+              <button
+                onClick={handleTestAuditWorkflow}
+                disabled={testingWorkflow === 'audit'}
+                className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                {testingWorkflow === 'audit' ? (
+                  <span>جاري التسجيل...</span>
+                ) : (
+                  <>
+                    <Zap className="w-3.5 h-3.5" />
+                    <span>اختبار تسجيل حدث تدقيق</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Workflow 3: Auth & Authorization */}
+            <div className="bg-white border-2 border-slate-200 rounded-3xl p-5 shadow-sm space-y-3 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center text-xl font-bold">
+                  🔐
+                </span>
+                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  Webhook جاهز 🟢
+                </span>
+              </div>
+              <div>
+                <h4 className="font-black text-slate-900 text-sm">EduFlow - Auth & Authorization</h4>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  كود: <code className="bg-slate-100 text-slate-700 px-1 rounded">WF-03</code> • فحص التوكن ورتب المستخدمين وصلاحيات المجموعات
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2 rounded-xl text-[10px] text-slate-600 font-mono break-all border border-slate-200">
+                POST /webhook/eduflow-auth
+              </div>
+              <button
+                onClick={handleTestAuthWorkflow}
+                disabled={testingWorkflow === 'auth'}
+                className="w-full py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                {testingWorkflow === 'auth' ? (
+                  <span>جاري الفحص...</span>
+                ) : (
+                  <>
+                    <Shield className="w-3.5 h-3.5" />
+                    <span>اختبار فحص الصلاحيات</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Workflow 4: AI Agents Multi-Persona Hub */}
+            <div className="bg-white border-2 border-slate-200 rounded-3xl p-5 shadow-sm space-y-3 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center text-xl font-bold">
+                  🤖
+                </span>
+                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  Webhook جاهز 🟢
+                </span>
+              </div>
+              <div>
+                <h4 className="font-black text-slate-900 text-sm">EduFlow – AI Agents Multi-Persona</h4>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  دمج: <code className="bg-slate-100 text-slate-700 px-1 rounded">WF-10/11/12/13</code> • مساعد المعلم، الطالب، ولي الأمر، والسكرتير
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2 rounded-xl text-[10px] text-slate-600 font-mono break-all border border-slate-200">
+                POST /webhook/eduflow-agent-chat
+              </div>
+              <button
+                onClick={handleTestAgentChatWorkflow}
+                disabled={testingWorkflow === 'agent-chat'}
+                className="w-full py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                {testingWorkflow === 'agent-chat' ? (
+                  <span>جاري المحادثة...</span>
+                ) : (
+                  <>
+                    <Bot className="w-3.5 h-3.5" />
+                    <span>اختبار استجابة المساعد الذكي</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Workflow 5: Material Processing & RAG Hub */}
+            <div className="bg-white border-2 border-slate-200 rounded-3xl p-5 shadow-sm space-y-3 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="w-10 h-10 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center text-xl font-bold">
+                  🧠
+                </span>
+                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  Webhook جاهز 🟢
+                </span>
+              </div>
+              <div>
+                <h4 className="font-black text-slate-900 text-sm">EduFlow – Material & RAG Hub</h4>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  دمج: <code className="bg-slate-100 text-slate-700 px-1 rounded">WF-04/05/06</code> • تقسيم المذكرات والبحث الدلالي في المنهج
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2 rounded-xl text-[10px] text-slate-600 font-mono break-all border border-slate-200">
+                POST /webhook/eduflow-rag-search
+              </div>
+              <button
+                onClick={handleTestRagWorkflow}
+                disabled={testingWorkflow === 'rag'}
+                className="w-full py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                {testingWorkflow === 'rag' ? (
+                  <span>جاري البحث...</span>
+                ) : (
+                  <>
+                    <BookOpen className="w-3.5 h-3.5" />
+                    <span>اختبار البحث الدلالي في المنهج</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Workflow 6: Exams & Assessment Hub */}
+            <div className="bg-white border-2 border-slate-200 rounded-3xl p-5 shadow-sm space-y-3 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center text-xl font-bold">
+                  📝
+                </span>
+                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  Webhook جاهز 🟢
+                </span>
+              </div>
+              <div>
+                <h4 className="font-black text-slate-900 text-sm">EduFlow – Exams & Assessment</h4>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  دمج: <code className="bg-slate-100 text-slate-700 px-1 rounded">WF-17/18/19</code> • توليد ونشر وتصحيح الامتحانات فورياً
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2 rounded-xl text-[10px] text-slate-600 font-mono break-all border border-slate-200">
+                POST /webhook/eduflow-exams
+              </div>
+              <button
+                onClick={handleTestExamsHub}
+                disabled={testingWorkflow === 'exams'}
+                className="w-full py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                {testingWorkflow === 'exams' ? (
+                  <span>جاري الإرسال...</span>
+                ) : (
+                  <>
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>اختبار مسودة امتحان تفاعلي</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Workflow 7: Notifications & Scheduled Reports */}
+            <div className="bg-white border-2 border-slate-200 rounded-3xl p-5 shadow-sm space-y-3 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl font-bold">
+                  📢
+                </span>
+                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  Webhook + مجدول 🟢
+                </span>
+              </div>
+              <div>
+                <h4 className="font-black text-slate-900 text-sm">EduFlow – Notifications & Reports</h4>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  دمج: <code className="bg-slate-100 text-slate-700 px-1 rounded">WF-27/28/29</code> • تذكيرات يومية 08:00 وتقارير أسبوعية للآباء
+                </p>
+              </div>
+              <div className="bg-slate-50 p-2 rounded-xl text-[10px] text-slate-600 font-mono break-all border border-slate-200">
+                POST /webhook/eduflow-notifications
+              </div>
+              <button
+                onClick={handleTestNotificationsHub}
+                disabled={testingWorkflow === 'notify'}
+                className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                {testingWorkflow === 'notify' ? (
+                  <span>جاري الإرسال...</span>
+                ) : (
+                  <>
+                    <Bell className="w-3.5 h-3.5" />
+                    <span>اختبار إرسال تنبيه فوري</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
           <div className="bg-white border-2 border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 flex-wrap gap-2">
               <div>
                 <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
-                  <span>⚙️ مركز تحكم خطوط الأتمتة (n8n & Gemini Automation Engine)</span>
+                  <span>⚙️ سجل أحداث خطوط الأتمتة والـ Webhooks المنفذة لحظياً</span>
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  مراقبة سجل الأحداث التلقائية والـ Webhooks المنفذة لحظياً
+                  توثيق فوري لعمليات التكامل بين موقع EduFlow و workflows فريق العمل على n8n
                 </p>
               </div>
 
               <button
                 onClick={handleSimulateWebhook}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
               >
                 <Play className="w-3.5 h-3.5" />
-                <span>إطلاق تجربة فورية للأتمتة</span>
+                <span>إطلاق تجربة Ping موحدة</span>
               </button>
             </div>
 

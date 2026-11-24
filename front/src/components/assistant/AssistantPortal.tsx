@@ -66,14 +66,24 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
     | 'payments'
     | 'complaints'
     | 'broadcast'
-  >('tracker');
+  >(() => (localStorage.getItem('eduflow_assistant_tab') as any) || 'tracker');
+
+  React.useEffect(() => {
+    localStorage.setItem('eduflow_assistant_tab', activeTab);
+  }, [activeTab]);
 
   // Groups and Sessions
   const groups = db.getGroups();
   const [selectedGroupId, setSelectedGroupId] = useState<string>(groups[0]?.id || 'g-1');
   const selectedGroup = groups.find((g: CourseGroup) => g.id === selectedGroupId) || groups[0];
   const groupSessions = db.getSessions(selectedGroupId);
-  const [selectedSessionId, setSelectedSessionId] = useState<string>(groupSessions[0]?.id || 'sess-1');
+  const [selectedSessionId, setSelectedSessionId] = useState<string>(groupSessions[0]?.id || '');
+
+  React.useEffect(() => {
+    if (!selectedSessionId || !groupSessions.some((s) => s.id === selectedSessionId)) {
+      setSelectedSessionId(groupSessions[0]?.id || '');
+    }
+  }, [groupSessions, selectedSessionId]);
 
   // Students enrolled in selected group
   const groupEnrollments = db.state.enrollments.filter(
@@ -1154,44 +1164,63 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {materials.map((m: CourseMaterial) => (
-              <div
-                key={m.id}
-                className="p-5 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:shadow-xs transition-all flex flex-col justify-between"
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-teal-100 text-teal-800">
-                      {m.file_type || 'PDF'}
-                    </span>
-                    <span className="text-[11px] text-slate-500">
-                      {m.download_count} تنزيل 📥
-                    </span>
-                  </div>
-                  <h4 className="text-sm font-bold text-slate-900 leading-snug">{m.title}</h4>
-                  <p className="text-xs text-slate-500 mt-1">
-                    مجموعة: {selectedGroup?.name}
-                  </p>
-                </div>
-
-                <div className="mt-4 pt-3 border-t border-slate-200/80 flex items-center justify-between text-xs">
-                  <span className="text-[11px] text-slate-400">
-                    {new Date(m.created_at).toLocaleDateString('ar-EG')}
-                  </span>
-                  <a
-                    href={m.file_url || '#'}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-teal-700 hover:text-teal-900 font-bold flex items-center gap-1"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>تحميل ومعاينة</span>
-                  </a>
-                </div>
+          {materials.length === 0 ? (
+            <div className="text-center py-12 px-4 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/50">
+              <div className="w-12 h-12 mx-auto rounded-full bg-teal-50 text-teal-600 flex items-center justify-center text-xl mb-3">
+                📚
               </div>
-            ))}
-          </div>
+              <h4 className="text-sm font-bold text-slate-800">لا توجد مذكرات أو ملفات تعليمية مرفوعة بعد</h4>
+              <p className="text-xs text-slate-500 max-w-md mx-auto mt-1 mb-4">
+                يمكنك رفع أول مذكرة دراسية أو شيت تدريبات بصيغة PDF ليتمكن طلاب المجموعة من تحميلها فوراً.
+              </p>
+              <button
+                onClick={() => setShowAddMaterialModal(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>رفع أول مذكرة الآن</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {materials.map((m: CourseMaterial) => (
+                <div
+                  key={m.id}
+                  className="p-5 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:shadow-xs transition-all flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-teal-100 text-teal-800">
+                        {m.file_type || 'PDF'}
+                      </span>
+                      <span className="text-[11px] text-slate-500">
+                        {m.download_count} تنزيل 📥
+                      </span>
+                    </div>
+                    <h4 className="text-sm font-bold text-slate-900 leading-snug">{m.title}</h4>
+                    <p className="text-xs text-slate-500 mt-1">
+                      مجموعة: {selectedGroup?.name}
+                    </p>
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-slate-200/80 flex items-center justify-between text-xs">
+                    <span className="text-[11px] text-slate-400">
+                      {new Date(m.created_at).toLocaleDateString('ar-EG')}
+                    </span>
+                    <a
+                      href={m.file_url || '#'}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-teal-700 hover:text-teal-900 font-bold flex items-center gap-1"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>تحميل ومعاينة</span>
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -1218,11 +1247,15 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
                 onChange={(e) => setSelectedSessionId(e.target.value)}
                 className="text-xs font-semibold bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
               >
-                {groupSessions.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    حصة {s.session_number}: {s.title}
-                  </option>
-                ))}
+                {groupSessions.length === 0 ? (
+                  <option value="">-- لا توجد حصص مسجلة بعد --</option>
+                ) : (
+                  groupSessions.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      حصة {s.session_number}: {s.title}
+                    </option>
+                  ))
+                )}
               </select>
             </div>
           </div>

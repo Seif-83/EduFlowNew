@@ -29,6 +29,7 @@ import { sendN8nEvent } from '../../services/n8nService';
 import { Flashcard3D } from '../common/Flashcard3D';
 import { ExamSolverModal } from '../common/ExamSolverModal';
 import { VideoPlayerModal } from '../common/VideoPlayerModal';
+import { FloatingAiTutor } from '../common/FloatingAiTutor';
 
 interface StudentPortalProps {
   currentStudent: Profile;
@@ -466,7 +467,6 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         {[
           { id: 'sessions', label: '🎬 المحاضرات والفيديوهات', icon: Video },
           { id: 'assignments', label: '📝 الواجبات والأنشطة', icon: FileText },
-          { id: 'ai_chat', label: '🤖 المعلم الذكي (اسأل في المنهج)', icon: MessageSquare },
           { id: 'attendance', label: '📊 سجل الحضور والغياب', icon: CalendarCheck },
           { id: 'generator', label: '⚡ المولد الذكي والبطاقات 3D', icon: Sparkles },
           { id: 'payments', label: '💳 المصروفات والاشتراكات', icon: CreditCard },
@@ -959,7 +959,14 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
             </p>
 
             <div className="space-y-4">
-              {sessions.map((sess) => {
+              {sessions.length === 0 ? (
+                <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl p-8 text-center text-slate-500 space-y-2">
+                  <div className="text-3xl">🎬</div>
+                  <h4 className="font-bold text-slate-800 text-sm">لا توجد حصص أو تسجيلات منشورة حتى الآن</h4>
+                  <p className="text-xs text-slate-400">سيقوم معلم المادة بنشر المحاضرات والتسجيلات هنا فور اعتمادها.</p>
+                </div>
+              ) : (
+                sessions.map((sess) => {
                 const plays = db.getVideoPlays(sess.id, currentStudent.id);
                 const playsCount = plays.length;
                 const remaining = Math.max(0, 3 - playsCount);
@@ -1017,7 +1024,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     </div>
                   </div>
                 );
-              })}
+              }))}
             </div>
           </div>
         </div>
@@ -1037,7 +1044,14 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               </p>
 
               <div className="space-y-4">
-                {assignments.map((asg) => {
+                {assignments.length === 0 ? (
+                  <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl p-8 text-center text-slate-500 space-y-2">
+                    <div className="text-3xl">📝</div>
+                    <h4 className="font-bold text-slate-800 text-sm">لا توجد واجبات منزلية مطلوبة حالياً</h4>
+                    <p className="text-xs text-slate-400">ستظهر هنا أي واجبات أو مهام يكلفك بها معلم المادة.</p>
+                  </div>
+                ) : (
+                  assignments.map((asg) => {
                   const submission = mySubmissions.find((s) => s.assignment_id === asg.id);
                   const isGraded = submission?.status === 'graded';
                   const isSubmitted = submission !== undefined;
@@ -1101,7 +1115,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                       )}
                     </div>
                   );
-                })}
+                }))}
               </div>
             </div>
           </div>
@@ -1312,69 +1326,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         </div>
       )}
 
-      {/* TAB 6: AI Chat (RAG Tutor) */}
-      {activeTab === 'ai_chat' && (
-        <div className="bg-white border-2 border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-            <div>
-              <h3 className="text-lg font-black text-blue-950 flex items-center gap-2">
-                <span>🤖 المساعد الأكاديمي الذكي (RAG Course Tutor)</span>
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                مدرب على مذكرات ومقررات منهجك، ويجيبك بتفسيرات علمية معتمدة
-              </p>
-            </div>
-            <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold px-3 py-1 rounded-full">
-              متصل بقاعدة البيانات المعرفية 🟢
-            </span>
-          </div>
-
-          <div className="h-80 overflow-y-auto space-y-3 p-4 bg-slate-50 rounded-2xl border border-slate-200">
-            {chatMessages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex gap-3 text-xs sm:text-sm ${
-                  msg.sender === 'user' ? 'justify-end' : 'justify-start'
-                }`}
-              >
-                {msg.sender === 'assistant' && (
-                  <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm shrink-0">
-                    🤖
-                  </div>
-                )}
-                <div
-                  className={`p-4 rounded-2xl max-w-lg leading-relaxed ${
-                    msg.sender === 'user'
-                      ? 'bg-blue-600 text-white font-medium rounded-bl-none'
-                      : 'bg-white border border-slate-200 text-slate-800 rounded-br-none shadow-2xs'
-                  }`}
-                >
-                  {msg.message}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <form onSubmit={handleSendChat} className="flex gap-2">
-            <input
-              type="text"
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              placeholder="اطرح سؤالك الأكاديمي هنا (مثال: ما هو الشريان الرئوي؟ كيف نحسب السرعة؟)..."
-              className="flex-1 p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold focus:bg-white focus:border-blue-600 outline-hidden"
-            />
-            <button
-              type="submit"
-              className="px-5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs sm:text-sm rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <Send className="w-4 h-4" />
-              <span>إرسال</span>
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* TAB 7: Complaints */}
+      {/* TAB 6: Complaints */}
       {activeTab === 'complaints' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
@@ -1517,6 +1469,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
           }}
         />
       )}
+
+      {/* Floating Circular AI Smart Tutor (Bottom Right) */}
+      <FloatingAiTutor currentStudent={currentStudent} />
     </div>
   );
 };

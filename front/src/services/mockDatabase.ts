@@ -29,7 +29,7 @@ import {
 import { sendN8nEvent } from './n8nService';
 import { supabase, createStudentInSupabase, resetSupabaseTestStudents } from './supabaseClient';
 
-const STORAGE_KEY = 'eduflow_db_v1';
+const STORAGE_KEY = 'eduflow_db_v3';
 
 // Seed Initial Database State
 function getInitialData() {
@@ -111,7 +111,7 @@ function getInitialData() {
       created_at: '2026-09-01T12:00:00Z',
       course_title: 'العلوم العامة والأحياء - الصف الثاني الإعدادي',
       teacher_name: 'أ. أحمد رضوان',
-      active_students: 2,
+      active_students: 0,
     },
     {
       id: 'g-2',
@@ -124,195 +124,16 @@ function getInitialData() {
       created_at: '2026-09-02T12:00:00Z',
       course_title: 'الرياضيات والجبر - الصف الثاني الإعدادي',
       teacher_name: 'د. مروة محمود',
-      active_students: 2,
+      active_students: 0,
     },
   ];
 
   const enrollments: Enrollment[] = [];
-
-  const sessions: Session[] = [
-    {
-      id: 'sess-1',
-      group_id: 'g-1',
-      title: 'الحصة 1: مدخل إلى التركيب الذري والجدول الدوري',
-      description: 'دراسة النواة، الإلكترونات، والروابط الكيميائية مع أمثلة تفاعلية.',
-      session_number: 1,
-      video_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-      materials_url: 'https://example.com/materials/session-1.pdf',
-      scheduled_at: '2026-09-20T17:00:00Z',
-      is_published: true,
-      created_at: '2026-09-15T10:00:00Z',
-    },
-    {
-      id: 'sess-2',
-      group_id: 'g-1',
-      title: 'الحصة 2: الجهاز الدوري ووظائف القلب والدم',
-      description: 'شرح الدورة الدموية الكبرى والصغرى وتركيب الدم ومكونات البلازما.',
-      session_number: 2,
-      video_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-      materials_url: 'https://example.com/materials/session-2.pdf',
-      scheduled_at: '2026-09-27T17:00:00Z',
-      is_published: true,
-      created_at: '2026-09-22T10:00:00Z',
-    },
-    {
-      id: 'sess-3',
-      group_id: 'g-1',
-      title: 'الحصة 3: الجهاز التنفسي والتبادل الغازي',
-      description: 'تركيب الرئتين والحويصلات الهوائية وميكانيكية التنفس.',
-      session_number: 3,
-      video_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-      materials_url: 'https://example.com/materials/session-3.pdf',
-      scheduled_at: '2026-10-04T17:00:00Z',
-      is_published: true,
-      created_at: '2026-09-30T10:00:00Z',
-    },
-    {
-      id: 'sess-201',
-      group_id: 'g-2',
-      title: 'الحصة 1: التحليل الرياضي وحل المعادلات من الدرجة الثانية',
-      description: 'طرق التحليل الرياضي، القانون العام، والتطبيقات الهندسية.',
-      session_number: 1,
-      scheduled_at: '2026-09-22T16:00:00Z',
-      is_published: true,
-      created_at: '2026-09-16T10:00:00Z',
-    },
-  ];
-
+  const sessions: Session[] = [];
   const videoPlays: VideoPlay[] = [];
-
-  const exams: Exam[] = [
-    {
-      id: 'ex-1',
-      session_id: 'sess-1',
-      title: 'اختبار الحصة 1: التركيب الذري والمفاهيم الكيميائية',
-      passing_score: 70,
-      duration_minutes: 15,
-      is_published: true,
-      created_at: '2026-09-18T10:00:00Z',
-      subject: 'علوم',
-      grade_level: 'الصف الثاني الإعدادي',
-      deadline: 'متاح للحل الآن',
-      questions: [
-        {
-          id: 'q-101',
-          exam_id: 'ex-1',
-          question_text: 'أي من الجسيمات التالية يحمل شحنة موجبة داخل نواة الذرة؟',
-          question_type: 'mcq',
-          options: ['الإلكترونات', 'البروتونات', 'النيوترونات', 'الفوتونات'],
-          correct_answer: 'البروتونات',
-          points: 1,
-          explanation: 'البروتونات جسيمات موجبة الشحنة وتوجد داخل نواة الذرة مع النيوترونات المتعادلة.',
-        },
-        {
-          id: 'q-102',
-          exam_id: 'ex-1',
-          question_text: 'الذرة متعادلة كهربياً في حالتها العادية لأن عدد البروتونات يساوي عدد الإلكترونات.',
-          question_type: 'true_false',
-          options: ['صواب', 'خطأ'],
-          correct_answer: 'صواب',
-          points: 1,
-          explanation: 'تتعادل الشحنات الموجبة للبروتونات مع الشحنات السالبة للإلكترونات الخارجية.',
-        },
-        {
-          id: 'q-103',
-          exam_id: 'ex-1',
-          question_text: 'أقصى عدد من الإلكترونات يستوعبه مستوى الطاقة الأول (K) هو:',
-          question_type: 'mcq',
-          options: ['2 إلكترون', '8 إلكترونات', '18 إلكترون', '32 إلكترون'],
-          correct_answer: '2 إلكترون',
-          points: 1,
-          explanation: 'طبقاً للقاعدة 2n²، فإن المستوى الأول n=1 يستوعب 2*(1)² = 2 إلكترون.',
-        },
-      ],
-    },
-    {
-      id: 'ex-2',
-      session_id: 'sess-2',
-      title: 'اختبار الحصة 2: الجهاز الدوري ووظائف القلب والدم',
-      passing_score: 70,
-      duration_minutes: 20,
-      is_published: true,
-      created_at: '2026-09-25T10:00:00Z',
-      subject: 'أحياء وعلوم',
-      grade_level: 'الصف الثاني الإعدادي',
-      deadline: 'قبل موعد الحصة القادمة',
-      questions: [
-        {
-          id: 'q-201',
-          exam_id: 'ex-2',
-          question_text: 'ما هو العضو العضلي الذي يضخ الدم المحمل بالأكسجين إلى جميع أجزاء الجسم؟',
-          question_type: 'mcq',
-          options: ['الرئتان', 'القلب', 'الكبد', 'الكليتان'],
-          correct_answer: 'القلب',
-          points: 1,
-          explanation: 'القلب هو المضخة المركزية للدورة الدموية وينبض لدفع الدم لكافة خلايا الجسم.',
-        },
-        {
-          id: 'q-202',
-          exam_id: 'ex-2',
-          question_text: 'المسؤول عن تخثر الدم وتكوين الجلطة الواقية عند حدوث جرح هو:',
-          question_type: 'mcq',
-          options: ['خلايا الدم الحمراء', 'خلايا الدم البيضاء', 'الصفائح الدموية', 'الهيموجلوبين'],
-          correct_answer: 'الصفائح الدموية',
-          points: 1,
-          explanation: 'الصفائح الدموية أجزاء خلوية تلعب الدور الأساسي في إيقاف النزيف وتجلط الدم.',
-        },
-        {
-          id: 'q-203',
-          exam_id: 'ex-2',
-          question_text: 'الشرايين تحمل الدم دائماً من القلب إلى أعضاء الجسم المختلفة.',
-          question_type: 'true_false',
-          options: ['صواب', 'خطأ'],
-          correct_answer: 'صواب',
-          points: 1,
-          explanation: 'الشريان ينقل الدم الصادر من القلب، بينما الوريد يعيد الدم إلى القلب.',
-        },
-        {
-          id: 'q-204',
-          exam_id: 'ex-2',
-          question_text: 'تتكون بلازما الدم في معظمها (حوالي 90%) من:',
-          question_type: 'mcq',
-          options: ['الماء', 'البروتينات', 'الأملاح', 'الدهون'],
-          correct_answer: 'الماء',
-          points: 1,
-          explanation: 'الماء يشكل حوالي 90-92% من حجم بلازما الدم لنقل المواد الغذائية والهرمونات.',
-        },
-      ],
-    },
-  ];
-
+  const exams: Exam[] = [];
   const examAttempts: ExamAttempt[] = [];
-
-  const assignments: Assignment[] = [
-    {
-      id: 'asg-1',
-      group_id: 'g-1',
-      session_id: 'sess-2',
-      title: 'واجب منزلي: مقارنة بين خلايا الدم الحمراء والبيضاء',
-      description: 'قم بكتابة ملخص في 5 أسطر أو ارفع ملف يوضح الفرق الوظيفي والشكل بين كريات الدم الحمراء والبيضاء.',
-      due_at: '2026-11-20T23:59:00Z',
-      max_score: 20,
-      is_published: true,
-      created_by: 'tea-1',
-      created_at: '2026-09-28T10:00:00Z',
-      group_name: 'مجموعة الأوائل - علوم 2 إعدادي',
-    },
-    {
-      id: 'asg-2',
-      group_id: 'g-1',
-      session_id: 'sess-1',
-      title: 'واجب التركيب الذري: التوزيع الإلكتروني لـ 5 عناصر',
-      description: 'اكتب التوزيع الإلكتروني لكل من (الصوديوم Na، الأكسجين O، الكلور Cl، المغنيسيوم Mg، النيون Ne).',
-      due_at: '2026-11-15T23:59:00Z',
-      max_score: 15,
-      is_published: true,
-      created_by: 'tea-1',
-      created_at: '2026-09-20T10:00:00Z',
-      group_name: 'مجموعة الأوائل - علوم 2 إعدادي',
-    },
-  ];
-
+  const assignments: Assignment[] = [];
   const submissions: AssignmentSubmission[] = [];
   const attendance: Attendance[] = [];
 
@@ -359,51 +180,7 @@ function getInitialData() {
     },
   ];
 
-  const teacherEarnings: TeacherEarning[] = [
-    {
-      id: 'te-1',
-      teacher_id: 'tea-1',
-      group_id: 'g-1',
-      session_id: 'sess-1',
-      amount: 200,
-      currency: 'EGP',
-      description: 'مستحقات تدريس الحصة 1 (التركيب الذري)',
-      status: 'paid',
-      calculated_at: '2026-09-20T19:00:00Z',
-      paid_at: '2026-09-30T12:00:00Z',
-      teacher_name: 'أ. أحمد رضوان',
-      group_name: 'مجموعة الأوائل - علوم 2 إعدادي',
-      session_title: 'الحصة 1',
-    },
-    {
-      id: 'te-2',
-      teacher_id: 'tea-1',
-      group_id: 'g-1',
-      session_id: 'sess-2',
-      amount: 200,
-      currency: 'EGP',
-      description: 'مستحقات تدريس الحصة 2 (الجهاز الدوري)',
-      status: 'approved',
-      calculated_at: '2026-09-27T19:00:00Z',
-      teacher_name: 'أ. أحمد رضوان',
-      group_name: 'مجموعة الأوائل - علوم 2 إعدادي',
-      session_title: 'الحصة 2',
-    },
-    {
-      id: 'te-3',
-      teacher_id: 'tea-1',
-      group_id: 'g-1',
-      session_id: 'sess-3',
-      amount: 200,
-      currency: 'EGP',
-      description: 'مستحقات تدريس الحصة 3 (الجهاز التنفسي)',
-      status: 'pending',
-      calculated_at: '2026-10-04T19:00:00Z',
-      teacher_name: 'أ. أحمد رضوان',
-      group_name: 'مجموعة الأوائل - علوم 2 إعدادي',
-      session_title: 'الحصة 3',
-    },
-  ];
+  const teacherEarnings: TeacherEarning[] = [];
 
   const parentLinks: ParentStudentLink[] = [];
 
@@ -510,6 +287,9 @@ class MockDatabaseService {
   private loadState(): DatabaseState {
     if (typeof window !== 'undefined') {
       try {
+        localStorage.removeItem('eduflow_db');
+        localStorage.removeItem('eduflow_db_v1');
+        localStorage.removeItem('eduflow_db_v2');
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored) {
           const parsed = JSON.parse(stored);
@@ -865,6 +645,60 @@ class MockDatabaseService {
 
   getGroups(): CourseGroup[] {
     return [...this.state.groups];
+  }
+
+  createGroup(data: {
+    teacher_id: string;
+    course_id: string;
+    name: string;
+    schedule_time?: string;
+    start_date?: string;
+    end_date?: string;
+    course_title?: string;
+    teacher_name?: string;
+    max_students?: number;
+    amount?: number;
+  }): CourseGroup {
+    const newId = `g-${Date.now()}`;
+    const newGroup: CourseGroup = {
+      id: newId,
+      course_id: data.course_id || 'c-1',
+      teacher_id: data.teacher_id,
+      name: data.name,
+      schedule_time: data.schedule_time || 'السبت والثلاثاء - 06:00 مساءً',
+      start_date: data.start_date || new Date().toISOString().split('T')[0],
+      end_date: data.end_date || '2027-01-30',
+      status: 'active',
+      created_at: new Date().toISOString(),
+      course_title: data.course_title,
+      teacher_name: data.teacher_name,
+      active_students: 0,
+      max_students: data.max_students || 30,
+    };
+    this.state.groups.push(newGroup);
+
+    this.state.billingSettings.push({
+      id: `gbs-${Date.now()}`,
+      group_id: newId,
+      payment_type: 'monthly',
+      amount: data.amount || 450,
+      currency: 'EGP',
+      created_at: new Date().toISOString(),
+    });
+
+    this.state.teacherComp.push({
+      id: `tc-${Date.now()}`,
+      group_id: newId,
+      teacher_id: data.teacher_id,
+      compensation_type: 'per_session',
+      amount: 200,
+      currency: 'EGP',
+      created_at: new Date().toISOString(),
+    });
+
+    this.persist();
+    this.notify();
+    return newGroup;
   }
 
   getGroupsForTeacher(teacherId: string): CourseGroup[] {

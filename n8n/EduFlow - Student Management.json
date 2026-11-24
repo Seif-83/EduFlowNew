@@ -1,0 +1,262 @@
+{
+  "name": "EduFlow – Student Management",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "\nconst input = $input.first()?.json ?? {};\n\nconst p = {\n  ...input,\n  ...(input.body && typeof input.body === 'object' ? input.body : {}),\n  ...(input.data && typeof input.data === 'object' ? input.data : {}),\n  ...(input.payload && typeof input.payload === 'object' ? input.payload : {})\n};\n\nconst action = String(\n  p.action || p.operation || p.event || ''\n).trim();\n\nconst uuid = (v) => typeof v === 'string' &&\n  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);\n\nconst enc = (v) => encodeURIComponent(String(v));\n\nconst fail = (message) => {\n  throw new Error(message);\n};\n\nif (!action) {\n  fail(\n    'Missing action. Send action in the input JSON. ' +\n    'Supported actions: student.create, student.update, student.get, ' +\n    'student.search, student.enroll, student.enrollment.update, ' +\n    'student.enrollments.list, student.enrollment.remove. ' +\n    'Received fields: ' + Object.keys(input).join(', ')\n  );\n}\n\nconst base = 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1';\nlet method = 'GET';\nlet path = '';\nlet body = undefined;\nlet prefer = 'return=representation';\n\nswitch (action) {\n  case 'student.create': {\n    // Auth account must already exist. id is the auth.users UUID.\n    if (!uuid(p.student_id)) fail('student_id must be the existing Supabase Auth user UUID. Create the Auth account before calling SW-08.');\n    if (!p.full_name || !String(p.full_name).trim()) fail('full_name is required.');\n    if (!p.email || !String(p.email).trim()) fail('email is required.');\n    body = { id: p.student_id, full_name: String(p.full_name).trim(), email: String(p.email).trim().toLowerCase(), role: 'student' };\n    if (p.phone !== undefined) body.phone = p.phone === null ? null : String(p.phone).trim();\n    method = 'POST'; path = '/profiles?on_conflict=id'; prefer = 'resolution=merge-duplicates,return=representation';\n    break;\n  }\n  case 'student.update': {\n    if (!uuid(p.student_id)) fail('student_id must be a valid UUID.');\n    body = {};\n    for (const key of ['full_name','email','phone']) if (Object.prototype.hasOwnProperty.call(p,key)) body[key] = key === 'email' && p[key] ? String(p[key]).trim().toLowerCase() : p[key];\n    if (!Object.keys(body).length) fail('Provide at least one of full_name, email, or phone.');\n    if (body.full_name !== undefined && !String(body.full_name).trim()) fail('full_name cannot be empty.');\n    if (body.email !== undefined && !String(body.email).trim()) fail('email cannot be empty.');\n    method = 'PATCH'; path = `/profiles?id=eq.${enc(p.student_id)}&role=eq.student`;\n    break;\n  }\n  case 'student.get': {\n    if (!uuid(p.student_id)) fail('student_id must be a valid UUID.');\n    path = `/profiles?id=eq.${enc(p.student_id)}&role=eq.student&select=id,full_name,email,phone,role,created_at`;\n    break;\n  }\n  case 'student.search': {\n    const term = String(p.search || '').trim();\n    if (term.length < 2) fail('search must contain at least 2 characters.');\n    path = `/profiles?role=eq.student&select=id,full_name,email,phone,created_at&or=(full_name.ilike.*${enc(term)}*,email.ilike.*${enc(term)}*,phone.ilike.*${enc(term)}*)&order=full_name.asc&limit=${Math.min(Math.max(Number(p.limit)||25,1),100)}`;\n    break;\n  }\n  case 'student.enroll': {\n    if (!uuid(p.student_id) || !uuid(p.group_id)) fail('student_id and group_id must be valid UUIDs.');\n    body = { student_id: p.student_id, group_id: p.group_id, status: 'active' };\n    method = 'POST'; path = '/enrollments?on_conflict=student_id,group_id';\n    prefer = 'resolution=merge-duplicates,return=representation';\n    break;\n  }\n  case 'student.enrollment.update': {\n    if (!uuid(p.enrollment_id)) fail('enrollment_id must be a valid UUID.');\n    if (!['active','completed','cancelled'].includes(p.status)) fail('status must be active, completed, or cancelled.');\n    body = { status: p.status };\n    method = 'PATCH'; path = `/enrollments?id=eq.${enc(p.enrollment_id)}`;\n    break;\n  }\n  case 'student.enrollments.list': {\n    if (!uuid(p.student_id)) fail('student_id must be a valid UUID.');\n    path = `/enrollments?student_id=eq.${enc(p.student_id)}&select=id,student_id,group_id,enrolled_at,status,course_groups(id,name,workspace_id,course_id)&order=enrolled_at.desc`;\n    break;\n  }\n  case 'student.enrollment.remove': {\n    if (!uuid(p.enrollment_id)) fail('enrollment_id must be a valid UUID.');\n    // Soft removal: preserve historical records by marking the enrollment cancelled.\n    body = { status: 'cancelled' };\n    method = 'PATCH'; path = `/enrollments?id=eq.${enc(p.enrollment_id)}`;\n    break;\n  }\n  default: fail(`Unsupported action: ${action || '(missing)'}`);\n}\n\nreturn [{ json: {\n  action,\n  http_method: method,\n  request_url: base + path,\n  request_body: body,\n  prefer,\n  student_id: p.student_id || null,\n  _note: 'This workflow expects a trusted server-side caller. Do not expose the Supabase secret or call this workflow directly from an untrusted browser.'\n} }];"
+      },
+      "id": "695a4251-4678-441e-8317-96e6705ec8fd",
+      "name": "Validate & Build Student Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3648,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "method": "={{ $json.http_method }}",
+        "url": "={{ $json.request_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "={{ $json.prefer }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.request_body ? JSON.stringify($json.request_body) : '' }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "384075ec-0fdc-41f5-bc46-ba4a0c6fba78",
+      "name": "Supabase – Student Management",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3872,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.all().map(i => i.json);\nreturn [{ json: { success: true, workflow: 'SW-08', result } }];"
+      },
+      "id": "355fe16a-57c9-40c2-acdf-9e9c0518caa0",
+      "name": "Return Student Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4096,
+        384
+      ]
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        3200,
+        384
+      ],
+      "id": "a2bd63fb-79d8-44e9-b3dd-de7be6cbf9f7",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "57fcf41e-877c-4cc9-8a07-222040368442",
+              "name": "action",
+              "value": "student.search",
+              "type": "string"
+            },
+            {
+              "id": "d58a38c1-6e29-4907-b408-ba6ae1788e19",
+              "name": "search",
+              "value": "Ahmed",
+              "type": "string"
+            },
+            {
+              "id": "73728faf-d1ef-4161-8d94-de091c349a9e",
+              "name": "limit",
+              "value": "10",
+              "type": "number"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        3424,
+        384
+      ],
+      "id": "25932689-7f68-47a4-b68d-15940dfc0b1b",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "eduflow-students",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-students-trigger",
+      "name": "Webhook – Student Management",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        3200,
+        200
+      ],
+      "webhookId": "eduflow-students"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "execute-students-trigger",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        3200,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "respond-students-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        4320,
+        384
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Validate & Build Student Request": {
+      "main": [
+        [
+          {
+            "node": "Supabase – Student Management",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase – Student Management": {
+      "main": [
+        [
+          {
+            "node": "Return Student Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Validate & Build Student Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook – Student Management": {
+      "main": [
+        [
+          {
+            "node": "Validate & Build Student Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          {
+            "node": "Validate & Build Student Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return Student Result": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "d30fa0aa-d4e3-48d4-a7e2-e966b94a079f",
+  "meta": {
+    "instanceId": "3b5f9f2abe3e60d61542b86048168743a7c19edb0532f18fe40c2c5723f46506"
+  },
+  "nodeGroups": [],
+  "id": "qlkOfjMWRo5iplNQ",
+  "tags": []
+}

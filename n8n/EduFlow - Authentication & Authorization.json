@@ -1,0 +1,689 @@
+{
+  "name": "EduFlow - Authentication & Authorization",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "name": "TRIGGER | Called by Other Workflow",
+      "id": "326eb34b-209a-4c38-9ebe-b62dea749d3f",
+      "position": [
+        -1088,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst i = (raw.body && typeof raw.body === 'object') ? { ...raw, ...raw.body } : raw;\n\nconst token = typeof i.access_token === 'string' ? i.access_token.replace(/^Bearer\\s+/i, '').trim() : '';\nconst okToken = /^[A-Za-z0-9\\-_]+\\.[A-Za-z0-9\\-_]+\\.[A-Za-z0-9\\-_]+$/.test(token);\nconst uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nconst groupId = i.group_id ? String(i.group_id).trim() : '';\n\nif (!okToken) return [{ json: { valid: false, code: 'UNAUTHENTICATED', message: 'Missing or malformed access token' } }];\nif (groupId && !uuidRe.test(groupId)) return [{ json: { valid: false, code: 'VALIDATION', message: 'group_id is not a valid UUID' } }];\n\nlet roles = [];\nif (Array.isArray(i.required_roles)) roles = i.required_roles;\nelse if (typeof i.required_roles === 'string' && i.required_roles) roles = i.required_roles.split(',').map(s => s.trim());\n\nreturn [{ json: { valid: true, access_token: token, required_roles: roles, group_id: groupId || null, group_requirement: i.group_requirement || null } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "CODE | Validate Input",
+      "id": "bc376178-1032-44aa-975b-c6c987b9725c",
+      "position": [
+        -832,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "34177b1f-07c0-45c2-a57e-82cc46e5b6eb",
+              "leftValue": "={{ $json.valid === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "name": "IF | Input Valid",
+      "id": "41fe903e-55c7-418b-b339-046f542e18fe",
+      "position": [
+        -608,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://zhbntxnsdznpdqmjyxpp.supabase.co/auth/v1/user",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM5MzA2NjQsImV4cCI6MjEwOTUwNjY2NH0.lITIAnyggVx19D8Re8zG1qZ6tzU_3YEVe7B1kGsg8uA"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('CODE | Validate Input').first().json.access_token }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "AUTH | Verify Access Token",
+      "id": "279e61cd-5b0c-478b-b58f-c634f5fc987f",
+      "position": [
+        -384,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "6d19f160-366a-470c-a05f-4d058a1fe494",
+              "leftValue": "={{ $json.statusCode === 200 && !!$json.body && !!$json.body.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "name": "IF | Token Valid",
+      "id": "d72488ef-9a5d-4f32-8c56-2a94c533abf1",
+      "position": [
+        -160,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/profiles?select=id,email,full_name,role&id=eq.' + $('AUTH | Verify Access Token').first().json.body.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM5MzA2NjQsImV4cCI6MjEwOTUwNjY2NH0.lITIAnyggVx19D8Re8zG1qZ6tzU_3YEVe7B1kGsg8uA"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('CODE | Validate Input').first().json.access_token }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "DB | Fetch Own Profile",
+      "id": "06d065b6-9ecd-45ce-9443-e387893259ed",
+      "position": [
+        64,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/workspace_members?select=workspace_id,member_role,permissions,status&status=eq.active&user_id=eq.' + $('AUTH | Verify Access Token').first().json.body.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM5MzA2NjQsImV4cCI6MjEwOTUwNjY2NH0.lITIAnyggVx19D8Re8zG1qZ6tzU_3YEVe7B1kGsg8uA"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('CODE | Validate Input').first().json.access_token }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "DB | Fetch Own Memberships",
+      "id": "cf7af363-00ef-4dcd-936e-4ba31b675667",
+      "position": [
+        288,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/parent_student_links?select=student_id&status=eq.approved&parent_id=eq.' + $('AUTH | Verify Access Token').first().json.body.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM5MzA2NjQsImV4cCI6MjEwOTUwNjY2NH0.lITIAnyggVx19D8Re8zG1qZ6tzU_3YEVe7B1kGsg8uA"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('CODE | Validate Input').first().json.access_token }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "DB | Fetch Own Parent Links",
+      "id": "9a336237-5502-4297-951f-fce928d6e876",
+      "position": [
+        512,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $('CODE | Validate Input').first().json;\nconst auth = $('AUTH | Verify Access Token').first().json.body;\nconst prof = $('DB | Fetch Own Profile').first().json;\nconst wm = $('DB | Fetch Own Memberships').first().json;\nconst par = $('DB | Fetch Own Parent Links').first().json;\nconst bad = (code, message, extra) => [{ json: { need_group: false, final: { success: false, authenticated: true, authorized: false, code, message, ...(extra || {}) } } }];\nif (prof.statusCode !== 200 || !Array.isArray(prof.body) || prof.body.length === 0) return bad('FORBIDDEN', 'User profile not found');\nconst profile = prof.body[0];\nconst members = (wm.statusCode === 200 && Array.isArray(wm.body)) ? wm.body : [];\nconst links = (par.statusCode === 200 && Array.isArray(par.body)) ? par.body : [];\nconst roles = new Set();\nif (profile.role) roles.add(profile.role);\nfor (const m of members) {\n  if (m.member_role === 'owner' || m.member_role === 'teacher') roles.add('teacher');\n  if (m.member_role === 'assistant') roles.add('assistant');\n}\nif (links.length > 0) roles.add('parent');\nconst perms = {};\nfor (const m of members.filter(x => x.member_role === 'assistant')) {\n  for (const [k, v] of Object.entries(m.permissions || {})) if (v === true || v === 'true') perms[k] = true;\n}\nconst rolesArr = [...roles];\nconst user = {\n  user_id: auth.id, email: auth.email, full_name: profile.full_name || null, profile_role: profile.role || null,\n  roles: rolesArr, is_admin: roles.has('admin'),\n  memberships: members.map(m => ({ workspace_id: m.workspace_id, member_role: m.member_role, permissions: m.permissions || {} })),\n  assistant_permissions: Object.keys(perms), children_ids: links.map(l => l.student_id)\n};\nconst req = base.required_roles || [];\nif (req.length && !req.some(r => roles.has(r))) return bad('FORBIDDEN', 'User does not have the required role', { roles: rolesArr });\nif (base.group_id) {\n  const calls = [{ rpc: 'is_group_teacher', body: { p_group_id: base.group_id } }, { rpc: 'is_group_student', body: { p_group_id: base.group_id } }];\n  const r = base.group_requirement;\n  if (r && r.startsWith('manage:')) calls.push({ rpc: 'has_group_assistant_permission', body: { p_group_id: base.group_id, p_permission: r.slice(7) } });\n  return [{ json: { need_group: true, user, calls } }];\n}\nreturn [{ json: { need_group: false, final: { success: true, authenticated: true, authorized: true, code: 'OK', role: profile.role || null, ...user } } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "CODE | Evaluate Roles",
+      "id": "ad5439f4-2f65-49e2-80ae-787607dc49b3",
+      "position": [
+        736,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b0531d87-988f-4307-b3f2-5b77237758f6",
+              "leftValue": "={{ $json.need_group === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "name": "IF | Needs Group Check",
+      "id": "d234ad42-df44-4a5d-beb4-a0d10d73d186",
+      "position": [
+        960,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const calls = $input.first().json.calls;\nreturn calls.map(c => ({ json: c }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "CODE | Expand Group Checks",
+      "id": "b751f0fc-277f-43f2-aa71-a221e542bc7f",
+      "position": [
+        1184,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/rpc/' + $json.rpc }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM5MzA2NjQsImV4cCI6MjEwOTUwNjY2NH0.lITIAnyggVx19D8Re8zG1qZ6tzU_3YEVe7B1kGsg8uA"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('CODE | Validate Input').first().json.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "DB | Run Group Check RPC",
+      "id": "6be1c6da-d5d9-419b-a314-f6c7d7555e62",
+      "position": [
+        1408,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('CODE | Evaluate Roles').first().json;\nconst user = ctx.user;\nconst base = $('CODE | Validate Input').first().json;\nconst res = $input.all().map(i => i.json);\nif (res.some(x => x.statusCode !== 200)) return [{ json: { success: false, authenticated: true, authorized: false, code: 'UPSTREAM_ERROR', message: 'Group permission check failed' } }];\nconst val = k => res[k] && res[k].body === true;\nconst r = base.group_requirement;\nconst ga = { is_teacher: val(0), is_student: val(1), has_permission: (r && r.startsWith('manage:')) ? val(2) : false };\nlet ok = true;\nif (r === 'teacher') ok = user.is_admin || ga.is_teacher;\nelse if (r === 'student') ok = ga.is_student;\nelse if (r === 'teacher_or_student') ok = user.is_admin || ga.is_teacher || ga.is_student;\nelse if (r && r.startsWith('manage:')) ok = user.is_admin || ga.is_teacher || ga.has_permission;\nreturn [{ json: { success: ok, authenticated: true, authorized: ok, code: ok ? 'OK' : 'FORBIDDEN', message: ok ? undefined : 'No access to this group', role: user.profile_role, ...user, group_id: base.group_id, group_access: ga } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "CODE | Finalize Group Access",
+      "id": "fa519f20-3d7f-4778-bde5-d51337a43c38",
+      "position": [
+        1632,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: $input.first().json.final }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "CODE | Finalize",
+      "id": "421d7d7d-e3d5-4e63-a612-bfb97e791500",
+      "position": [
+        1184,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "content": "دورها باختصار إنها بتشتغل كـ **\"بوابة أمن وحماية\" (Middleware)** للسيستم بتاعك.\n\nوظيفتها تستلم طلب المستخدم، تتأكد من صحة التوكن وهويته (Authentication)، وتفحص أدواره وصلاحياته في قاعدة البيانات (Supabase) عشان تقرر هل مسموح له ينفذ الأكشن ده أو يدخل على الجروب ده ولا لأ (Authorization)، وفي النهاية بترد بـ \"مسموح\" وتمرر بياناته، أو \"مرفوض\" وتمنع العملية.",
+        "height": 208,
+        "width": 320,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -960,
+        832
+      ],
+      "typeVersion": 1,
+      "id": "e74bd7b2-4201-4072-8191-bb8429a424a2",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nreturn [{ json: { success: false, authorized: false, authenticated: false, code: j.code || 'FORBIDDEN', message: j.message || 'Request failed' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "RESPONSE | Fail1",
+      "id": "5780c35e-fedb-4f9a-8287-ae885dc8f1ec",
+      "position": [
+        64,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "eduflow-auth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-auth-trigger",
+      "name": "Webhook – Auth & Access",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1088,
+        300
+      ],
+      "webhookId": "eduflow-auth"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "respond-auth-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1750,
+        430
+      ]
+    }
+  ],
+  "pinData": {
+    "TRIGGER | Called by Other Workflow": [
+      {
+        "json": {
+          "access_token": "Bearer mock-teacher-header.mock-teacher-payload.mock-signature",
+          "required_roles": [
+            "teacher",
+            "admin"
+          ],
+          "group_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "group_requirement": "teacher"
+        }
+      }
+    ],
+    "AUTH | Verify Access Token": [
+      {
+        "json": {
+          "statusCode": 200,
+          "body": {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "email": "teacher.mohamed@example.com"
+          }
+        }
+      }
+    ],
+    "DB | Fetch Own Profile": [
+      {
+        "json": {
+          "statusCode": 200,
+          "body": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "email": "teacher.mohamed@example.com",
+              "full_name": "أستاذ محمد محمود",
+              "role": "teacher"
+            }
+          ]
+        }
+      }
+    ],
+    "DB | Fetch Own Memberships": [
+      {
+        "json": {
+          "statusCode": 200,
+          "body": []
+        }
+      }
+    ],
+    "DB | Fetch Own Parent Links": [
+      {
+        "json": {
+          "statusCode": 200,
+          "body": []
+        }
+      }
+    ],
+    "DB | Run Group Check RPC": [
+      {
+        "json": {
+          "statusCode": 200,
+          "body": true
+        }
+      },
+      {
+        "json": {
+          "statusCode": 200,
+          "body": false
+        }
+      }
+    ]
+  },
+  "connections": {
+    "CODE | Validate Input": {
+      "main": [
+        [
+          {
+            "node": "IF | Input Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF | Input Valid": {
+      "main": [
+        [
+          {
+            "node": "AUTH | Verify Access Token",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "RESPONSE | Fail1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AUTH | Verify Access Token": {
+      "main": [
+        [
+          {
+            "node": "IF | Token Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF | Token Valid": {
+      "main": [
+        [
+          {
+            "node": "DB | Fetch Own Profile",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "RESPONSE | Fail1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB | Fetch Own Profile": {
+      "main": [
+        [
+          {
+            "node": "DB | Fetch Own Memberships",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB | Fetch Own Memberships": {
+      "main": [
+        [
+          {
+            "node": "DB | Fetch Own Parent Links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB | Fetch Own Parent Links": {
+      "main": [
+        [
+          {
+            "node": "CODE | Evaluate Roles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CODE | Evaluate Roles": {
+      "main": [
+        [
+          {
+            "node": "IF | Needs Group Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF | Needs Group Check": {
+      "main": [
+        [
+          {
+            "node": "CODE | Expand Group Checks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CODE | Finalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CODE | Expand Group Checks": {
+      "main": [
+        [
+          {
+            "node": "DB | Run Group Check RPC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB | Run Group Check RPC": {
+      "main": [
+        [
+          {
+            "node": "CODE | Finalize Group Access",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TRIGGER | Called by Other Workflow": {
+      "main": [
+        [
+          {
+            "node": "CODE | Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook – Auth & Access": {
+      "main": [
+        [
+          {
+            "node": "CODE | Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CODE | Finalize": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RESPONSE | Fail1": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "62b98e15-29b1-4464-b197-3573ba643d19",
+  "meta": {},
+  "id": "2ZNs2AL206NkKmSz",
+  "tags": []
+}

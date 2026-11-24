@@ -19,14 +19,12 @@ import { EduFlowLogo } from '../common/EduFlowLogo';
 interface HeaderProps {
   currentProfile: Profile;
   onOpenRoleModal: () => void;
-  onResetData: () => void;
   onLogout: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   currentProfile,
   onOpenRoleModal,
-  onResetData,
   onLogout,
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
@@ -82,7 +80,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             {showNotifications && (
-              <div className="absolute left-0 sm:right-auto sm:left-0 mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 p-4 z-50 animate-in fade-in zoom-in-95 duration-150">
+              <div className="absolute left-0 sm:right-auto sm:left-0 mt-2 w-[calc(100vw-2.5rem)] max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-200 p-4 z-50 animate-in fade-in zoom-in-95 duration-150">
                 <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                   <h4 className="font-bold text-slate-900 text-sm flex items-center gap-1.5">
                     <Bell className="w-4 h-4 text-blue-600" />
@@ -128,32 +126,12 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </div>
 
-          {/* Reset Demo Data Button */}
-          <button
-            onClick={onResetData}
-            className="p-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-600 transition-colors hidden md:flex items-center gap-1.5 text-xs font-bold"
-            title="إعادة تعيين البيانات الافتراضية"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>إعادة ضبط البيانات</span>
-          </button>
-
-          {/* Current Role Badge & Persona Switcher */}
-          {['student', 'parent'].includes(currentProfile.role) ? (
-            <div className={`flex items-center gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl border font-bold text-xs sm:text-sm ${badge.color}`}>
-              <RoleIcon className="w-4 h-4 shrink-0" />
-              <div className="text-right">
-                <div className="leading-none text-[13px]">{badge.label}</div>
-                <div className="text-[10px] opacity-75 font-medium mt-0.5 max-w-[120px] truncate hidden sm:block">
-                  {currentProfile.full_name}
-                </div>
-              </div>
-            </div>
-          ) : (
+          {/* Current Role Badge & Persona Switcher (Only Admin is permitted to switch roles) */}
+          {currentProfile.role === 'admin' ? (
             <button
               onClick={onOpenRoleModal}
               className={`flex items-center gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl border font-bold text-xs sm:text-sm cursor-pointer hover:shadow-xs transition-all ${badge.color}`}
-              title="اضغط لتبديل الدور (مساعد / معلم / إدارة)"
+              title="اضغط لتبديل الدور (صلاحية خاصة بالإدارة فقط)"
             >
               <RoleIcon className="w-4 h-4 shrink-0" />
               <div className="text-right">
@@ -164,6 +142,16 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
               <ChevronDown className="w-3.5 h-3.5 opacity-60 mr-1" />
             </button>
+          ) : (
+            <div className={`flex items-center gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl border font-bold text-xs sm:text-sm ${badge.color}`}>
+              <RoleIcon className="w-4 h-4 shrink-0" />
+              <div className="text-right">
+                <div className="leading-none text-[13px]">{badge.label}</div>
+                <div className="text-[10px] opacity-75 font-medium mt-0.5 max-w-[120px] truncate hidden sm:block">
+                  {currentProfile.full_name}
+                </div>
+              </div>
+            </div>
           )}
 
           {/* Logout Button */}
