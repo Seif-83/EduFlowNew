@@ -26,8 +26,9 @@ import {
   AutomationLog,
   StudentFollowUpRecord,
 } from '../types/database';
-import { sendN8nEvent } from './n8nService';
-import { supabase, createStudentInSupabase, resetSupabaseTestStudents } from './supabaseClient';
+import { sendN8nEvent, callStudentWorkflow, callAuditWorkflow, callNotificationsWorkflow, callMaterialIngestWorkflow } from './n8nService';
+import { supabase, supabaseAdmin, createUserInSupabase, createStudentInSupabase, resetSupabaseTestStudents, deleteAuthUserInSupabase } from './supabaseClient';
+import { diffAndPush, snapshotOnly, pullAll, fromDb, newUuid, isUuid } from './supabaseSync';
 
 const STORAGE_KEY = 'eduflow_db_v3';
 
@@ -227,44 +228,142 @@ class MockDatabaseService {
   public state: DatabaseState;
   private listeners: Array<() => void> = [];
 
+  private syncSnapshot: Record<string, Map<string, string>> = {};
+  private syncReady = false;
+
   constructor() {
     this.state = this.loadState();
+    // Snapshot the local state so the first persist() after hydration does
+    // not re-push everything we already have.
+    this.syncSnapshot = snapshotOnly(this.state);
+    this.syncReady = true;
     // Auto sync from live Supabase cloud database
     this.syncFromSupabase();
   }
 
-  async syncFromSupabase(): Promise<void> {
+  /**
+   * Hydrate the local store from Supabase (all tables) so real data follows
+   * users across devices, then keep every later mutation in sync via
+   * write-through pushes in persist().
+   */
+  async hydrateFromSupabase(): Promise<void> {
     try {
-      const { data: profiles, error } = await supabase.from('profiles').select('*');
-      if (!error && profiles && profiles.length > 0) {
-        profiles.forEach((p) => {
-          const idx = this.state.profiles.findIndex(
-            (ep) => ep.id === p.id || (ep.email && ep.email === p.email)
-          );
-          if (idx >= 0) {
-            this.state.profiles[idx] = {
-              ...this.state.profiles[idx],
-              full_name: p.full_name || this.state.profiles[idx].full_name,
-              role: p.role as any,
-              phone: p.phone || this.state.profiles[idx].phone,
-            };
-          } else {
-            this.state.profiles.push({
-              id: p.id,
-              full_name: p.full_name,
-              email: p.email,
-              phone: p.phone || '',
-              role: p.role as any,
-              created_at: p.created_at,
-            });
+      const tables = await pullAll();
+      const state: any = this.state;
+      const nameOf = (table: string) =>
+        Object.entries({
+          profiles: 'profiles', courses: 'courses', course_groups: 'groups',
+          enrollments: 'enrollments', sessions: 'sessions', video_plays: 'videoPlays',
+          exams: 'exams', exam_attempts: 'examAttempts', assignments: 'assignments',
+          assignment_submissions: 'submissions', attendance: 'attendance',
+          student_payments: 'studentPayments', payment_transactions: 'paymentTransactions',
+          group_billing_settings: 'billingSettings', teacher_compensation: 'teacherComp',
+          teacher_earnings: 'teacherEarnings', complaints: 'complaints',
+          notifications: 'notifications', course_materials: 'courseMaterials',
+          student_notes: 'studentNotes', parent_student_links: 'parentLinks',
+          ai_conversations: 'aiConversations', ai_messages: 'aiMessages',
+        }).find(([, t]) => t === table)?.[0];
+
+      let merged = 0;
+      for (const [table, rows] of Object.entries(tables)) {
+        const mapFn = (fromDb as any)[table];
+        const collection = nameOf(table);
+        if (!mapFn || !collection || !Array.isArray(rows)) continue;
+        if (!Array.isArray(state[collection])) state[collection] = [];
+        for (const raw of rows) {
+          try {
+            const remote = mapFn(raw);
+            const idx = state[collection].findIndex((x: any) => x.id === remote.id);
+            if (idx >= 0) {
+              // Remote wins for synced columns; keep local-only denormalized fields.
+              state[collection][idx] = { ...state[collection][idx], ...remote };
+            } else {
+              state[collection].push(remote);
+            }
+            merged++;
+          } catch (err) {
+            console.warn(`[Hydrate] failed to map ${table} row:`, err);
           }
-        });
+        }
+      }
+
+      // Re-attach exam questions to their exams.
+      if (Array.isArray(tables.questions) && Array.isArray(state.exams)) {
+        const byExam: Record<string, any[]> = {};
+        for (const q of tables.questions) {
+          try {
+            const mapped = (fromDb as any).questions(q);
+            (byExam[mapped.exam_id] = byExam[mapped.exam_id] || []).push(mapped);
+          } catch { /* skip */ }
+        }
+        for (const exam of state.exams) {
+          const remoteQs = byExam[exam.id];
+          if (remoteQs && remoteQs.length) {
+            const localQs = Array.isArray(exam.questions) ? exam.questions : [];
+            const localIds = new Set(localQs.map((q: any) => q.id));
+            exam.questions = [...localQs, ...remoteQs.filter((q) => !localIds.has(q.id))];
+          }
+        }
+      }
+
+      this.decorate();
+      // Snapshot AFTER merge so hydrated rows are not pushed back.
+      this.syncSnapshot = snapshotOnly(this.state);
+      if (merged > 0) {
         this.persist();
-        this.notify();
+        console.info(`[Hydrate] merged ${merged} rows from Supabase.`);
       }
     } catch (err) {
-      console.info('Supabase initial fetch note:', err);
+      console.info('[Hydrate] Supabase hydration note:', err);
     }
+  }
+
+  /** Fill denormalized display fields (names) from related collections. */
+  private decorate(): void {
+    const state: any = this.state;
+    const profileName = (id: any) => state.profiles.find((p: any) => p.id === id)?.full_name;
+    const groupName = (id: any) => state.groups.find((g: any) => g.id === id)?.name;
+    const sessionInfo = (id: any) => state.sessions.find((s: any) => s.id === id);
+    const examInfo = (id: any) => state.exams.find((e: any) => e.id === id);
+    const assignmentInfo = (id: any) => state.assignments.find((a: any) => a.id === id);
+    for (const e of state.enrollments) {
+      e.student_name = e.student_name || profileName(e.student_id);
+      e.group_name = e.group_name || groupName(e.group_id);
+    }
+    for (const a of state.attendance) {
+      a.student_name = a.student_name || profileName(a.student_id);
+      const ses = sessionInfo(a.session_id);
+      a.session_title = a.session_title || ses?.title;
+      a.session_number = a.session_number ?? ses?.session_number;
+    }
+    for (const a of state.examAttempts) {
+      const ex = examInfo(a.exam_id);
+      a.exam_title = a.exam_title || ex?.title;
+      a.subject = a.subject || ex?.subject;
+    }
+    for (const sub of state.submissions) {
+      sub.student_name = sub.student_name || profileName(sub.student_id);
+      const asg = assignmentInfo(sub.assignment_id);
+      sub.assignment_title = sub.assignment_title || asg?.title;
+      sub.max_score = sub.max_score ?? asg?.max_score;
+    }
+    for (const p of state.studentPayments) {
+      p.student_name = p.student_name || profileName(p.student_id);
+      p.group_name = p.group_name || groupName(p.group_id);
+    }
+    for (const n of state.studentNotes) {
+      n.student_name = n.student_name || profileName(n.student_id);
+      n.teacher_name = n.teacher_name || profileName(n.teacher_id);
+    }
+    for (const g of state.groups) {
+      g.course_title = g.course_title || state.courses.find((c: any) => c.id === g.course_id)?.title;
+      g.teacher_name = g.teacher_name || profileName(g.teacher_id);
+    }
+  }
+
+  async syncFromSupabase(): Promise<void> {
+    // Full hydration from every Supabase table (profiles included).
+    await this.hydrateFromSupabase();
   }
 
   subscribe(listener: () => void): () => void {
@@ -352,11 +451,25 @@ class MockDatabaseService {
       }
     }
     this.notify();
+    // Write-through to Supabase: push only what changed since last persist.
+    if (this.syncReady) {
+      try {
+        this.syncSnapshot = diffAndPush(this.state, this.syncSnapshot, {
+          suppressDeletes: this.suppressDeleteSync,
+        });
+      } catch (err) {
+        console.warn('[SupabaseSync] diff/push note:', err);
+      }
+    }
   }
 
+  private suppressDeleteSync = false;
+
   resetToDefault() {
+    this.suppressDeleteSync = true;
     this.state = getInitialData();
     this.persist();
+    this.suppressDeleteSync = false;
     resetSupabaseTestStudents().then(() => {
       console.log('Cleaned up test students from Supabase cloud on reset.');
     });
@@ -446,6 +559,44 @@ class MockDatabaseService {
     return { success: true, profile };
   }
 
+  /**
+   * Look up a registered student directly in Supabase by phone (bypasses the
+   * local store, works on any device). Uses the lookup_student_by_phone RPC
+   * from supabase/setup.sql; falls back to a direct profiles query.
+   */
+  async findStudentByPhoneRemote(query: string): Promise<Profile | null> {
+    const q = (query || '').trim();
+    if (!q) return null;
+    try {
+      let rows: any[] | null = null;
+      const rpcRes = await supabaseAdmin.rpc('lookup_student_by_phone', { p_phone: q });
+      if (!rpcRes.error && Array.isArray(rpcRes.data)) {
+        rows = rpcRes.data;
+      } else {
+        const res = await supabaseAdmin
+          .from('profiles')
+          .select('*')
+          .eq('role', 'student')
+          .or(`phone.eq.${q},id.eq.${q}`)
+          .limit(1);
+        rows = res.error ? null : res.data;
+      }
+      if (!rows || rows.length === 0) return null;
+      const mapped = fromDb.profiles(rows[0]);
+      const idx = this.state.profiles.findIndex((p) => p.id === mapped.id || (p.phone && p.phone === mapped.phone));
+      if (idx >= 0) {
+        this.state.profiles[idx] = { ...this.state.profiles[idx], ...mapped };
+      } else {
+        this.state.profiles.push(mapped);
+      }
+      this.persist();
+      return this.state.profiles.find((p) => p.id === mapped.id) || mapped;
+    } catch (err) {
+      console.info('[ParentLogin] remote student lookup note:', err);
+      return null;
+    }
+  }
+
   // Parent login using student phone number or student ID code
   loginParentByStudentIdentifier(studentIdentifier: string): {
     success: boolean;
@@ -508,7 +659,7 @@ class MockDatabaseService {
     );
     if (!existingLink) {
       this.state.parentLinks.unshift({
-        id: 'pl-' + Date.now(),
+        id: newUuid(),
         parent_id: parent.id,
         student_id: student.id,
         status: 'approved',
@@ -527,7 +678,133 @@ class MockDatabaseService {
   }
 
   // Student standalone registration without requiring parent info
-  registerStudentStandalone(data: {
+  async registerUserStandalone(data: {
+    full_name: string;
+    phone: string;
+    email?: string;
+    password?: string;
+    role?: 'student' | 'teacher' | 'parent';
+    grade_level?: string;
+    group_id?: string;
+    teacher_id?: string;
+    subject?: string;
+    student_phone_for_parent?: string;
+  }): Promise<Profile> {
+    const role = data.role || 'student';
+    const prefix = role === 'teacher' ? 'tea-' : (role === 'parent' ? 'par-' : 'stu-');
+    const cleanPhone = data.phone.trim().replace(/\D/g, '') || Math.floor(100000 + Math.random() * 900000).toString();
+    let email = data.email?.trim() || `${role}.${cleanPhone}@eduflow.edu`;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      email = `${role}.${cleanPhone}@eduflow.edu`;
+    }
+    const pwd = data.password?.trim() || 'password123456';
+
+    let newId = prefix + Math.floor(100000 + Math.random() * 900000);
+
+    // 1. Direct Cloud Sync to Supabase Auth & Profiles
+    try {
+      const supaRes = await createUserInSupabase({
+        full_name: data.full_name,
+        phone: data.phone,
+        email,
+        password: pwd,
+        role,
+      });
+      if (supaRes.success && supaRes.id) {
+        newId = supaRes.id;
+      }
+    } catch (supaErr) {
+      console.warn('Supabase register error:', supaErr);
+    }
+
+    const teacherId = data.teacher_id || (data.group_id === 'g-2' ? 'tea-2' : 'tea-1');
+    const teacher = this.state.profiles.find((p) => p.id === teacherId);
+    let groupId = data.group_id;
+    if (role === 'student' && !groupId) {
+      const teacherGroup = this.state.groups.find((g) => g.teacher_id === teacherId);
+      groupId = teacherGroup?.id || 'g-1';
+    }
+
+    const avatar = role === 'teacher' ? '👨‍🏫' : (role === 'parent' ? '👨‍👩‍👧' : '👨‍🎓');
+
+    const profile: Profile = {
+      id: newId,
+      full_name: data.full_name.trim(),
+      phone: data.phone.trim(),
+      email,
+      password: pwd,
+      grade_level: data.grade_level || (role === 'teacher' ? (data.subject || 'معلم متخصص') : undefined),
+      role,
+      avatar,
+      teacher_id: role === 'student' ? teacherId : undefined,
+      teacher_name: role === 'student' ? (teacher?.full_name || 'أ. أحمد رضوان') : undefined,
+      created_at: new Date().toISOString(),
+    };
+
+    // If parent and student phone provided, link to student
+    if (role === 'parent' && data.student_phone_for_parent) {
+      const stu = this.state.profiles.find(p => p.role === 'student' && (p.phone === data.student_phone_for_parent || p.id === data.student_phone_for_parent));
+      if (stu) {
+        (profile as any).student_id = stu.id;
+        (stu as any).parent_id = profile.id;
+      }
+    }
+
+    this.state.profiles.push(profile);
+
+    const group = (role === 'student' && groupId) ? this.state.groups.find((g) => g.id === groupId) : null;
+    if (role === 'student' && groupId) {
+      this.state.enrollments.push({
+        id: newUuid(),
+        student_id: newId,
+        group_id: groupId,
+        enrolled_at: new Date().toISOString(),
+        status: 'active',
+        student_name: profile.full_name,
+        group_name: group?.name || 'المجموعة الدراسية',
+      });
+    }
+
+    // 2. Dispatch to n8n backend workflows
+    if (role === 'student') {
+      callStudentWorkflow('student.create', {
+        student_id: newId,
+        full_name: profile.full_name,
+        email: profile.email,
+        phone: profile.phone,
+      }).catch((err) => console.warn('n8n student.create dispatch note:', err));
+    }
+
+    callAuditWorkflow({
+      action: `${role}.registered`,
+      entity_type: role,
+      entity_id: newId,
+      actor_id: newId,
+      actor_role: role,
+      source: 'EduFlow Web Registration',
+      details: {
+        full_name: profile.full_name,
+        email: profile.email,
+        phone: profile.phone,
+        role,
+        registered_at: new Date().toISOString(),
+      },
+    }).catch((err) => console.warn('n8n audit dispatch note:', err));
+
+    callNotificationsWorkflow({
+      title: `🎉 انضمام ${role === 'student' ? 'طالب' : role === 'teacher' ? 'معلم' : 'ولي أمر'} جديد`,
+      message: `تم تسجيل حساب (${profile.full_name}) بنجاح في منصة EduFlow وتفعيله.`,
+      notification_type: 'onboarding',
+      user_ids: [newId],
+    }).catch((err) => console.warn('n8n notification dispatch note:', err));
+
+    this.state.currentUserId = newId;
+    this.persist();
+    this.notify();
+    return profile;
+  }
+
+  async registerStudentStandalone(data: {
     full_name: string;
     phone: string;
     email?: string;
@@ -535,77 +812,11 @@ class MockDatabaseService {
     grade_level: string;
     group_id?: string;
     teacher_id?: string;
-  }): Profile {
-    const newId = 'stu-' + Math.floor(100000 + Math.random() * 900000);
-    const cleanPhone = data.phone.trim().replace(/\D/g, '') || Math.floor(100000 + Math.random() * 900000).toString();
-    const email = data.email?.trim() || `stu.${cleanPhone}@eduflow.edu`;
-    
-    const teacherId = data.teacher_id || (data.group_id === 'g-2' ? 'tea-2' : 'tea-1');
-    const teacher = this.state.profiles.find((p) => p.id === teacherId);
-    let groupId = data.group_id;
-    if (!groupId) {
-      const teacherGroup = this.state.groups.find((g) => g.teacher_id === teacherId);
-      groupId = teacherGroup?.id || 'g-1';
-    }
-
-    const student: Profile = {
-      id: newId,
-      full_name: data.full_name.trim(),
-      phone: data.phone.trim(),
-      email,
-      password: data.password?.trim() || '123456',
-      grade_level: data.grade_level,
+  }): Promise<Profile> {
+    return this.registerUserStandalone({
+      ...data,
       role: 'student',
-      avatar: '👨‍🎓',
-      teacher_id: teacherId,
-      teacher_name: teacher?.full_name || 'أ. أحمد رضوان',
-      created_at: new Date().toISOString(),
-    };
-
-    this.state.profiles.push(student);
-
-    const group = groupId ? this.state.groups.find((g) => g.id === groupId) : null;
-    if (groupId) {
-      this.state.enrollments.push({
-        id: 'enr-' + Date.now(),
-        student_id: newId,
-        group_id: groupId,
-        enrolled_at: new Date().toISOString(),
-        status: 'active',
-        student_name: student.full_name,
-        group_name: group?.name || 'المجموعة الدراسية',
-      });
-    }
-
-    // 1. Direct Cloud Sync to Supabase Auth & Profiles
-    createStudentInSupabase({
-      full_name: student.full_name,
-      phone: student.phone,
-      email: student.email,
-      password: data.password || 'password123456',
-    }).then((res) => {
-      if (res.success && res.id) {
-        student.id = res.id;
-        this.persist();
-        this.notify();
-      }
     });
-
-    // 2. Trigger n8n Automation Workflow
-    sendN8nEvent('new_student_registered', {
-      student_name: student.full_name,
-      student_id: student.id,
-      phone: student.phone,
-      email: student.email,
-      grade_level: data.grade_level,
-      teacher_id: teacherId,
-      teacher_name: teacher?.full_name || 'أ. أحمد رضوان',
-      group_name: group?.name || 'المجموعة الدراسية',
-    });
-
-    this.state.currentUserId = newId;
-    this.persist();
-    return student;
   }
 
   getProfiles(): Profile[] {
@@ -635,7 +846,7 @@ class MockDatabaseService {
   addCourse(course: Omit<Course, 'id' | 'created_at'>): Course {
     const newCourse: Course = {
       ...course,
-      id: 'c-' + Date.now(),
+      id: newUuid(),
       created_at: new Date().toISOString(),
     };
     this.state.courses.push(newCourse);
@@ -659,7 +870,7 @@ class MockDatabaseService {
     max_students?: number;
     amount?: number;
   }): CourseGroup {
-    const newId = `g-${Date.now()}`;
+    const newId = newUuid();
     const newGroup: CourseGroup = {
       id: newId,
       course_id: data.course_id || 'c-1',
@@ -678,7 +889,7 @@ class MockDatabaseService {
     this.state.groups.push(newGroup);
 
     this.state.billingSettings.push({
-      id: `gbs-${Date.now()}`,
+      id: newUuid(),
       group_id: newId,
       payment_type: 'monthly',
       amount: data.amount || 450,
@@ -687,7 +898,7 @@ class MockDatabaseService {
     });
 
     this.state.teacherComp.push({
-      id: `tc-${Date.now()}`,
+      id: newUuid(),
       group_id: newId,
       teacher_id: data.teacher_id,
       compensation_type: 'per_session',
@@ -722,7 +933,7 @@ class MockDatabaseService {
   addSession(session: Omit<Session, 'id' | 'created_at'>): Session {
     const newSession: Session = {
       ...session,
-      id: 'sess-' + Date.now(),
+      id: newUuid(),
       created_at: new Date().toISOString(),
     };
     this.state.sessions.push(newSession);
@@ -738,6 +949,21 @@ class MockDatabaseService {
         related_url: `/sessions/${newSession.id}`,
       });
     });
+
+    // Dispatch to n8n Material Processing & Audit & Notifications
+    callMaterialIngestWorkflow({
+      title: session.title,
+      file_url: session.video_url || session.materials_url || '',
+      group_id: session.group_id,
+    }).catch((err) => console.warn('n8n session material ingest note:', err));
+
+    callAuditWorkflow({
+      action: 'session.created',
+      entity_type: 'session',
+      entity_id: newSession.id,
+      actor_role: 'teacher',
+      details: { title: session.title, video_url: session.video_url, group_id: session.group_id },
+    }).catch(() => {});
 
     this.persist();
     return newSession;
@@ -789,7 +1015,7 @@ class MockDatabaseService {
     }
 
     const newPlayNumber = previousPlays.length + 1;
-    const playId = 'vp-' + Date.now();
+    const playId = newUuid();
     const play: VideoPlay = {
       id: playId,
       session_id: sessionId,
@@ -838,7 +1064,7 @@ class MockDatabaseService {
   addExam(exam: Omit<Exam, 'id' | 'created_at'>): Exam {
     const newExam: Exam = {
       ...exam,
-      id: 'ex-' + Date.now(),
+      id: newUuid(),
       created_at: new Date().toISOString(),
     };
     this.state.exams.push(newExam);
@@ -851,6 +1077,7 @@ class MockDatabaseService {
     student_id: string;
     student_name: string;
     parent_email: string;
+    parent_name?: string;
     answers: Record<string, string>; // questionId -> selected choice string
   }): {
     score: number;
@@ -897,7 +1124,7 @@ class MockDatabaseService {
     const passed = pct >= (exam?.passing_score || 70);
 
     const attempt: ExamAttempt = {
-      id: 'att-' + Date.now(),
+      id: newUuid(),
       exam_id: data.exam_id,
       student_id: data.student_id,
       score,
@@ -973,7 +1200,7 @@ class MockDatabaseService {
   addAssignment(assignment: Omit<Assignment, 'id' | 'created_at'>): Assignment {
     const newAsg: Assignment = {
       ...assignment,
-      id: 'asg-' + Date.now(),
+      id: newUuid(),
       created_at: new Date().toISOString(),
     };
     this.state.assignments.unshift(newAsg);
@@ -1004,7 +1231,7 @@ class MockDatabaseService {
     );
 
     const submission: AssignmentSubmission = {
-      id: existingIdx >= 0 ? this.state.submissions[existingIdx].id : 'sub-' + Date.now(),
+      id: existingIdx >= 0 ? this.state.submissions[existingIdx].id : newUuid(),
       assignment_id: data.assignment_id,
       student_id: data.student_id,
       submission_text: data.submission_text,
@@ -1066,7 +1293,7 @@ class MockDatabaseService {
       const session = this.state.sessions.find((s) => s.id === r.session_id);
 
       const entry: Attendance = {
-        id: idx >= 0 ? this.state.attendance[idx].id : 'att-' + Date.now() + Math.random(),
+        id: idx >= 0 ? this.state.attendance[idx].id : newUuid(),
         session_id: r.session_id,
         student_id: r.student_id,
         status: r.status,
@@ -1130,7 +1357,7 @@ class MockDatabaseService {
 
     // Add transaction record
     this.state.paymentTransactions.push({
-      id: 'pt-' + Date.now(),
+      id: newUuid(),
       student_payment_id: paymentId,
       amount,
       payment_method: method,
@@ -1212,7 +1439,7 @@ class MockDatabaseService {
   }): Complaint {
     const user = this.state.profiles.find((p) => p.id === data.submitted_by);
     const complaint: Complaint = {
-      id: 'comp-' + Date.now(),
+      id: newUuid(),
       submitted_by: data.submitted_by,
       subject: data.subject,
       description: data.description,
@@ -1302,7 +1529,7 @@ class MockDatabaseService {
     related_url?: string;
   }) {
     this.state.notifications.unshift({
-      id: 'notif-' + Date.now() + Math.random(),
+      id: newUuid(),
       user_id: notif.user_id,
       title: notif.title,
       message: notif.message,
@@ -1328,7 +1555,7 @@ class MockDatabaseService {
   addCourseMaterial(data: Omit<CourseMaterial, 'id' | 'created_at' | 'rag_status' | 'rag_chunk_count'>): CourseMaterial {
     const mat: CourseMaterial = {
       ...data,
-      id: 'mat-' + Date.now(),
+      id: newUuid(),
       created_at: new Date().toISOString(),
       rag_status: 'completed',
       rag_chunk_count: Math.floor(Math.random() * 20) + 8,
@@ -1343,8 +1570,223 @@ class MockDatabaseService {
       status: 'success',
     });
 
+    callMaterialIngestWorkflow({
+      title: mat.title,
+      file_url: mat.file_url || '',
+      group_id: mat.group_id,
+    }).catch((err) => console.warn('n8n material ingest note:', err));
+
+    callAuditWorkflow({
+      action: 'material.uploaded',
+      entity_type: 'material',
+      entity_id: mat.id,
+      actor_role: 'teacher',
+      details: { title: mat.title, file_url: mat.file_url, file_type: mat.file_type },
+    }).catch(() => {});
+
     this.persist();
     return mat;
+  }
+
+  // Teacher: upload a study material (مذكرة) as a real file for a grade level
+  uploadMaterialByTeacher(data: {
+    title: string;
+    grade_level: string;
+    file_url: string;
+    file_type?: string;
+    description?: string;
+    teacher_id: string;
+    group_id?: string;
+  }): CourseMaterial {
+    const teacher = this.state.profiles.find((p) => p.id === data.teacher_id);
+    const mat: CourseMaterial = {
+      id: newUuid(),
+      title: data.title,
+      description: data.description,
+      file_url: data.file_url,
+      file_type: data.file_type || 'PDF',
+      grade_level: data.grade_level,
+      group_id: data.group_id,
+      uploaded_by: data.teacher_id,
+      download_count: 0,
+      created_at: new Date().toISOString(),
+      rag_status: 'completed',
+      rag_chunk_count: Math.floor(Math.random() * 20) + 8,
+      rag_processed_at: new Date().toISOString(),
+    };
+    this.state.courseMaterials.push(mat);
+
+    // Notify students in the same grade level
+    this.state.profiles
+      .filter(
+        (p) =>
+          p.role === 'student' &&
+          p.grade_level &&
+          (p.grade_level.includes(data.grade_level) || data.grade_level.includes(p.grade_level))
+      )
+      .forEach((stu) => {
+        this.addNotification({
+          user_id: stu.id,
+          title: 'تم رفع مذكرة دراسية جديدة 📚',
+          message: `قام ${teacher?.full_name || 'المعلم'} برفع مذكرة "${data.title}" لـ ${data.grade_level}. افتح تبويب المذكرات للتحميل.`,
+          type: 'info',
+        });
+      });
+
+    this.addAutomationLog({
+      trigger_name: 'RAG Ingestion: File Embedded',
+      source: 'gemini',
+      payload_summary: `تم تقطيع وفهرسة ملف "${mat.title}" إلى ${mat.rag_chunk_count} مقطع متزن.`,
+      status: 'success',
+    });
+
+    callMaterialIngestWorkflow({
+      title: mat.title,
+      file_url: mat.file_url || '',
+      teacher_id: data.teacher_id,
+      group_id: mat.group_id,
+    }).catch((err) => console.warn('n8n teacher material ingest note:', err));
+
+    callAuditWorkflow({
+      action: 'material.uploaded_by_teacher',
+      entity_type: 'material',
+      entity_id: mat.id,
+      actor_id: data.teacher_id,
+      actor_role: 'teacher',
+      details: { title: mat.title, file_url: mat.file_url, file_type: mat.file_type, grade_level: mat.grade_level },
+    }).catch(() => {});
+
+    this.persist();
+    return mat;
+  }
+
+  getMaterialsByTeacher(teacherId: string): CourseMaterial[] {
+    return this.state.courseMaterials
+      .filter((m) => m.uploaded_by === teacherId)
+      .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  }
+
+  getMaterialsForGrade(gradeLevel?: string): CourseMaterial[] {
+    const mats = [...this.state.courseMaterials].sort((a, b) =>
+      (b.created_at || '').localeCompare(a.created_at || '')
+    );
+    if (!gradeLevel) return mats;
+    return mats.filter(
+      (m) => !m.grade_level || m.grade_level.includes(gradeLevel) || gradeLevel.includes(m.grade_level)
+    );
+  }
+
+  // Teacher: remove a student from their list (un-enroll from the teacher's groups)
+  removeStudentFromTeacher(studentId: string, teacherId: string): { success: boolean; message: string } {
+    const student = this.state.profiles.find((p) => p.id === studentId && p.role === 'student');
+    if (!student) return { success: false, message: 'الطالب غير موجود في قائمتك' };
+    const teacherGroupIds = this.state.groups.filter((g) => g.teacher_id === teacherId).map((g) => g.id);
+    const before = this.state.enrollments.length;
+    this.state.enrollments = this.state.enrollments.filter(
+      (e) => !(e.student_id === studentId && teacherGroupIds.includes(e.group_id))
+    );
+    if (student.teacher_id === teacherId) {
+      student.teacher_id = undefined;
+      student.teacher_name = undefined;
+    }
+
+    callAuditWorkflow({
+      action: 'student.removed_from_teacher',
+      entity_type: 'student',
+      entity_id: studentId,
+      actor_id: teacherId,
+      actor_role: 'teacher',
+      source: 'EduFlow Teacher Portal',
+      details: { student_name: student.full_name, removed_enrollments: before - this.state.enrollments.length },
+    }).catch(() => {});
+
+    this.persist();
+    return { success: true, message: `تم حذف (${student.full_name}) من قائمة طلابك` };
+  }
+
+  // Admin: permanently delete a user (student/parent/teacher/assistant) and their linked data
+  deleteUserByAdmin(userId: string, adminId: string): { success: boolean; message: string } {
+    const target = this.state.profiles.find((p) => p.id === userId);
+    if (!target) return { success: false, message: 'المستخدم غير موجود' };
+    if (target.role === 'admin') return { success: false, message: 'لا يمكن حذف حساب إدارة عامة' };
+    if (target.id === adminId) return { success: false, message: 'لا يمكنك حذف حسابك بنفسك' };
+    const name = target.full_name;
+    const role = target.role;
+
+    this.state.profiles = this.state.profiles.filter((p) => p.id !== userId);
+    this.state.enrollments = this.state.enrollments.filter((e) => e.student_id !== userId);
+    this.state.videoPlays = this.state.videoPlays.filter((v) => v.student_id !== userId);
+    this.state.examAttempts = this.state.examAttempts.filter((a) => a.student_id !== userId);
+    this.state.submissions = this.state.submissions.filter((s) => s.student_id !== userId);
+    this.state.attendance = this.state.attendance.filter((a) => a.student_id !== userId);
+    this.state.studentPayments = this.state.studentPayments.filter((p) => p.student_id !== userId);
+    this.state.notifications = this.state.notifications.filter((n) => n.user_id !== userId);
+    this.state.studentNotes = this.state.studentNotes.filter((n) => n.student_id !== userId);
+    this.state.parentLinks = this.state.parentLinks.filter((l) => l.student_id !== userId && l.parent_id !== userId);
+    this.state.complaints = this.state.complaints.filter((c) => c.submitted_by !== userId);
+    const convIds = this.state.aiConversations.filter((c) => c.user_id === userId).map((c) => c.id);
+    this.state.aiConversations = this.state.aiConversations.filter((c) => c.user_id !== userId);
+    this.state.aiMessages = this.state.aiMessages.filter((m) => !convIds.includes(m.conversation_id));
+
+    // Best-effort delete from Supabase Auth; profiles row cascades in DB
+    deleteAuthUserInSupabase(userId).catch(() => {});
+
+    callAuditWorkflow({
+      action: `${role}.deleted`,
+      entity_type: role,
+      entity_id: userId,
+      actor_id: adminId,
+      actor_role: 'admin',
+      source: 'EduFlow Admin Portal',
+      details: { full_name: name },
+    }).catch(() => {});
+
+    this.persist();
+    return { success: true, message: `تم حذف (${name}) وكل بياناته نهائياً من المنظومة` };
+  }
+
+  // Admin: change a user's role (permissions control)
+  updateUserRoleByAdmin(
+    userId: string,
+    newRole: 'student' | 'teacher' | 'parent' | 'assistant' | 'admin',
+    adminId: string
+  ): { success: boolean; message: string } {
+    const labels: Record<string, string> = {
+      student: 'طالب',
+      teacher: 'معلم',
+      parent: 'ولي أمر',
+      assistant: 'مساعد',
+      admin: 'إدارة عامة',
+    };
+    const target = this.state.profiles.find((p) => p.id === userId);
+    if (!target) return { success: false, message: 'المستخدم غير موجود' };
+    if (target.id === adminId) return { success: false, message: 'لا يمكنك تغيير صلاحية حسابك بنفسك' };
+    const oldRole = target.role;
+    if (oldRole === newRole) return { success: true, message: 'الصلاحية لم تتغير' };
+
+    target.role = newRole;
+    if (newRole === 'teacher' && !target.grade_level) target.grade_level = 'معلم متخصص';
+    if (newRole !== 'student') {
+      target.teacher_id = undefined;
+      target.teacher_name = undefined;
+      this.state.enrollments = this.state.enrollments.filter((e) => e.student_id !== userId);
+    }
+
+    callAuditWorkflow({
+      action: 'user.role_changed',
+      entity_type: 'profile',
+      entity_id: userId,
+      actor_id: adminId,
+      actor_role: 'admin',
+      source: 'EduFlow Admin Portal',
+      details: { full_name: target.full_name, from: oldRole, to: newRole },
+    }).catch(() => {});
+
+    this.persist();
+    return {
+      success: true,
+      message: `تم تغيير صلاحية (${target.full_name}) من ${labels[oldRole] || oldRole} إلى ${labels[newRole] || newRole}`,
+    };
   }
 
   // Student Notes
@@ -1356,7 +1798,7 @@ class MockDatabaseService {
     const teacher = this.state.profiles.find((p) => p.id === teacherId);
     const student = this.state.profiles.find((p) => p.id === studentId);
     const entry: StudentNote = {
-      id: 'sn-' + Date.now(),
+      id: newUuid(),
       student_id: studentId,
       teacher_id: teacherId,
       group_id: groupId,
@@ -1401,7 +1843,7 @@ class MockDatabaseService {
     let conv = this.state.aiConversations.find((c) => c.user_id === userId);
     if (!conv) {
       conv = {
-        id: 'conv-' + Date.now(),
+        id: newUuid(),
         user_id: userId,
         title: 'مساعد EduFlow الذكي',
         created_at: new Date().toISOString(),
@@ -1417,7 +1859,7 @@ class MockDatabaseService {
     let conv = this.state.aiConversations.find((c) => c.user_id === userId);
     if (!conv) {
       conv = {
-        id: 'conv-' + Date.now(),
+        id: newUuid(),
         user_id: userId,
         title: 'مساعد EduFlow الذكي',
         created_at: new Date().toISOString(),
@@ -1427,7 +1869,7 @@ class MockDatabaseService {
     }
 
     const userMsg: AiMessage = {
-      id: 'msg-' + Date.now(),
+      id: newUuid(),
       conversation_id: conv.id,
       sender: 'user',
       message: userText,
@@ -1449,7 +1891,7 @@ class MockDatabaseService {
     }
 
     const assistantMsg: AiMessage = {
-      id: 'msg-' + (Date.now() + 1),
+      id: newUuid(),
       conversation_id: conv.id,
       sender: 'assistant',
       message: reply,
@@ -1487,7 +1929,7 @@ class MockDatabaseService {
     parent_email?: string;
     group_id?: string;
   }): Profile {
-    const studentId = 'stu-' + (this.state.profiles.filter((p) => p.role === 'student').length + 1) + '-' + Math.floor(Math.random() * 1000);
+    const studentId = newUuid();
     const newStudent: Profile = {
       id: studentId,
       full_name: data.full_name,
@@ -1507,7 +1949,7 @@ class MockDatabaseService {
     if (data.parent_name || data.parent_email) {
       let parent = this.state.profiles.find((p) => p.role === 'parent' && p.email === data.parent_email);
       if (!parent) {
-        const parentId = 'par-' + (this.state.profiles.filter((p) => p.role === 'parent').length + 1);
+        const parentId = newUuid();
         parent = {
           id: parentId,
           full_name: data.parent_name || 'أ. ولي أمر ' + data.full_name,
@@ -1521,7 +1963,7 @@ class MockDatabaseService {
       }
       newStudent.parent_id = parent.id;
       this.state.parentLinks.push({
-        id: 'pl-' + Date.now(),
+        id: newUuid(),
         parent_id: parent.id,
         student_id: newStudent.id,
         status: 'approved',
@@ -1530,10 +1972,10 @@ class MockDatabaseService {
     }
 
     // If group provided, create enrollment and initial monthly fee
+    const group = data.group_id ? this.state.groups.find((g) => g.id === data.group_id) : undefined;
     if (data.group_id) {
-      const group = this.state.groups.find((g) => g.id === data.group_id);
       this.state.enrollments.push({
-        id: 'enr-' + Date.now(),
+        id: newUuid(),
         student_id: newStudent.id,
         group_id: data.group_id,
         enrolled_at: new Date().toISOString(),
@@ -1544,7 +1986,7 @@ class MockDatabaseService {
 
       // Create initial billing invoice
       this.state.studentPayments.push({
-        id: 'inv-' + Date.now(),
+        id: newUuid(),
         student_id: newStudent.id,
         group_id: data.group_id,
         amount: 450,
@@ -1574,12 +2016,21 @@ class MockDatabaseService {
     // 1. Direct Cloud Sync to Supabase Auth & Profiles
     createStudentInSupabase({
       full_name: newStudent.full_name,
-      phone: newStudent.phone,
+      phone: newStudent.phone || '',
       email: newStudent.email,
       password: 'password123456',
     }).then((res) => {
-      if (res.success && res.id) {
+      if (res.success && res.id && res.id !== newStudent.id) {
+        const oldId = newStudent.id;
         newStudent.id = res.id;
+        // Remap every local reference to the old temporary id.
+        this.state.enrollments.forEach((e) => { if (e.student_id === oldId) e.student_id = res.id!; });
+        this.state.studentPayments.forEach((p) => { if (p.student_id === oldId) p.student_id = res.id!; });
+        this.state.parentLinks.forEach((l) => { if (l.student_id === oldId) l.student_id = res.id!; });
+        this.state.attendance.forEach((a) => { if (a.student_id === oldId) a.student_id = res.id!; });
+        this.state.examAttempts.forEach((a) => { if (a.student_id === oldId) a.student_id = res.id!; });
+        this.state.notifications.forEach((n) => { if (n.user_id === oldId) n.user_id = res.id!; });
+        if (this.state.currentUserId === oldId) this.state.currentUserId = res.id!;
         this.persist();
         this.notify();
       }
@@ -1611,7 +2062,7 @@ class MockDatabaseService {
   }): CourseMaterial {
     const group = this.state.groups.find((g) => g.id === data.group_id);
     const newMaterial: CourseMaterial = {
-      id: 'mat-' + Date.now(),
+      id: newUuid(),
       group_id: data.group_id,
       session_id: data.session_id,
       title: data.title,
@@ -1637,6 +2088,20 @@ class MockDatabaseService {
       });
     });
 
+    callMaterialIngestWorkflow({
+      title: newMaterial.title,
+      file_url: newMaterial.file_url || '',
+      group_id: newMaterial.group_id,
+    }).catch((err) => console.warn('n8n assistant material ingest note:', err));
+
+    callAuditWorkflow({
+      action: 'material.uploaded_by_assistant',
+      entity_type: 'material',
+      entity_id: newMaterial.id,
+      actor_role: 'assistant',
+      details: { title: newMaterial.title, file_url: newMaterial.file_url },
+    }).catch(() => {});
+
     this.persist();
     return newMaterial;
   }
@@ -1657,7 +2122,7 @@ class MockDatabaseService {
         existing.recorded_at = new Date().toISOString();
       } else {
         this.state.attendance.push({
-          id: 'att-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+          id: newUuid(),
           session_id: sessionId,
           student_id: rec.student_id,
           status: rec.status,
@@ -1701,7 +2166,7 @@ class MockDatabaseService {
     if (!invoice) return { success: false };
 
     const transaction: PaymentTransaction = {
-      id: 'tx-' + Date.now(),
+      id: newUuid(),
       student_payment_id: invoice.id,
       amount: data.amount,
       payment_method: data.payment_method,
@@ -1846,9 +2311,9 @@ class MockDatabaseService {
     material_url?: string;
     questions?: Omit<Question, 'id' | 'exam_id'>[];
   }): Exam {
-    const examId = 'ex-' + Date.now();
+    const examId = newUuid();
     const createdQuestions: Question[] = (data.questions || []).map((q, idx) => ({
-      id: `q-${examId}-${idx + 1}`,
+      id: newUuid(),
       exam_id: examId,
       question_text: q.question_text,
       question_type: q.question_type || 'mcq',

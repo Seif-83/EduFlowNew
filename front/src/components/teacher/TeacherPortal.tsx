@@ -14,10 +14,13 @@ import {
   FileText,
   UserCheck,
   X,
+  Upload,
+  Trash2,
 } from 'lucide-react';
-import { Profile, Session, Exam, Question } from '../../types/database';
+import { Profile, Session, Exam, Question, CourseMaterial } from '../../types/database';
 import { db } from '../../services/mockDatabase';
 import { sendN8nEvent } from '../../services/n8nService';
+import { uploadMaterialFileToSupabase } from '../../services/supabaseClient';
 import { FloatingTeacherStudios } from './FloatingTeacherStudios';
 
 interface TeacherPortalProps {
@@ -27,11 +30,11 @@ interface TeacherPortalProps {
 export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) => {
   const [refreshKey, setRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<
-    'groups' | 'grading' | 'attendance' | 'earnings'
+    'groups' | 'materials' | 'grading' | 'attendance' | 'earnings'
   >(() => {
     const saved = localStorage.getItem('eduflow_teacher_tab');
-    if (saved === 'groups' || saved === 'grading' || saved === 'attendance' || saved === 'earnings') {
-      return saved as 'groups' | 'grading' | 'attendance' | 'earnings';
+    if (saved === 'groups' || saved === 'materials' || saved === 'grading' || saved === 'attendance' || saved === 'earnings') {
+      return saved as 'groups' | 'materials' | 'grading' | 'attendance' | 'earnings';
     }
     return 'groups';
   });
@@ -47,14 +50,75 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
     }
   }, [sessions, selectedSessionId]);
 
-  // Enrolled students in this group or under this teacher
+  // Enrolled students in this group or under this teacher only.
+  // (Removed the old fallback that showed EVERY student to a teacher with an
+  // empty group — that made a new student appear under all teachers.)
   const enrollments = db.state.enrollments.filter((e) => e.group_id === selectedGroupId && e.status === 'active');
-  let studentProfiles = db.getStudents().filter((s) => 
+  const studentProfiles = db.getStudents().filter((s) =>
     enrollments.some((e) => e.student_id === s.id) || s.teacher_id === currentTeacher.id
   );
-  if (studentProfiles.length === 0) {
-    studentProfiles = db.getStudents();
-  }
+
+  // Remove student from this teacher's list
+  const [removeStudentMsg, setRemoveStudentMsg] = useState('');
+  const handleRemoveStudent = (studentId: string, studentName: string) => {
+    if (!window.confirm(`هل أنت متأكد من حذف الطالب (${studentName}) من قائمتك؟ سيبقى حسابه على المنصة لكنه لن يظهر في مجموعاتك.`)) return;
+    const res = db.removeStudentFromTeacher(studentId, currentTeacher.id);
+    setRemoveStudentMsg(res.message);
+    setRefreshKey((k) => k + 1);
+    setTimeout(() => setRemoveStudentMsg(''), 3000);
+  };
+
+  // Study materials (مذكرات) upload state
+  const [matTitle, setMatTitle] = useState('');
+  const [matGrade, setMatGrade] = useState('الصف الأول الإعدادي');
+  const [matFile, setMatFile] = useState<File | null>(null);
+  const [matYoutubeUrl, setMatYoutubeUrl] = useState('');
+  const [matDescription, setMatDescription] = useState('');
+  const [matUploading, setMatUploading] = useState(false);
+  const [matMsg, setMatMsg] = useState('');
+  const [matError, setMatError] = useState('');
+  const myMaterials = db.getMaterialsByTeacher(currentTeacher.id);
+
+  const handleUploadMaterial = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMatError('');
+    if (!matTitle.trim()) return;
+    const youtube = matYoutubeUrl.trim();
+    if (!matFile && !youtube) {
+      setMatError('ارفع ملف المذكرة أو ضع لينك يوتيوب على الأقل.');
+      return;
+    }
+    setMatUploading(true);
+    let fileUrl = youtube;
+    let fileType = youtube ? 'YouTube' : 'PDF';
+    if (matFile) {
+      const up = await uploadMaterialFileToSupabase(matFile, currentTeacher.id);
+      if (!up.success || !up.url) {
+        setMatUploading(false);
+        setMatError(`فشل رفع الملف إلى Supabase Storage (${up.error || 'خطأ غير معروف'}). تأكد من تشغيل supabase/setup2.sql لإنشاء bucket باسم course-materials.`);
+        return;
+      }
+      fileUrl = up.url;
+      const ext = matFile.name.split('.').pop()?.toUpperCase();
+      fileType = ext && ext.length <= 5 ? ext : (matFile.type || 'PDF');
+    }
+    db.uploadMaterialByTeacher({
+      title: matTitle.trim(),
+      grade_level: matGrade,
+      file_url: fileUrl,
+      file_type: fileType,
+      description: matDescription.trim() || undefined,
+      teacher_id: currentTeacher.id,
+    });
+    setMatUploading(false);
+    setMatMsg(`✅ تم رفع المذكرة "${matTitle.trim()}" لـ ${matGrade} بنجاح`);
+    setMatTitle('');
+    setMatFile(null);
+    setMatYoutubeUrl('');
+    setMatDescription('');
+    setRefreshKey((k) => k + 1);
+    setTimeout(() => setMatMsg(''), 4000);
+  };
 
   // Homework grading desk
   const pendingSubmissions = db.state.submissions.filter((s) => s.status === 'submitted');
@@ -217,7 +281,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 stagger">
       {/* Teacher Profile Banner */}
       <div className="bg-white border-2 border-slate-200 rounded-3xl p-5 sm:p-6 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
@@ -303,6 +367,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
         {[
           { id: 'groups', label: '👥 المجموعات والطلاب', icon: Users },
+          { id: 'materials', label: '📚 المذكرات الدراسية', icon: Upload },
           { id: 'grading', label: `✍️ تصحيح الواجبات (${pendingSubmissions.length})`, icon: FileCheck },
           { id: 'attendance', label: '📋 تسجيل الحضور والغياب', icon: CalendarCheck },
           { id: 'earnings', label: '💰 المستحقات والأرباح', icon: DollarSign },
@@ -373,6 +438,18 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
               </p>
 
               <div className="divide-y divide-slate-100">
+                {removeStudentMsg && (
+                  <div className="p-3 mb-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl">
+                    {removeStudentMsg}
+                  </div>
+                )}
+                {studentProfiles.length === 0 && (
+                  <div className="p-8 text-center text-slate-400 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200 my-2">
+                    <Users className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                    <p className="text-sm font-bold text-slate-700">لا يوجد طلاب في قائمتك حالياً.</p>
+                    <p className="text-xs text-slate-400 mt-1">عند تسجيل طالب جديد واختيارك كمعلم، سيظهر اسمه هنا فوراً.</p>
+                  </div>
+                )}
                 {studentProfiles.map((s) => (
                   <div key={s.id} className="py-4 flex items-center justify-between gap-4 flex-wrap">
                     <div className="flex items-center gap-3">
@@ -395,6 +472,14 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
                         className="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-100 text-xs font-bold text-slate-700"
                       >
                         ✍️ إضافة ملاحظة
+                      </button>
+                      <button
+                        onClick={() => handleRemoveStudent(s.id, s.full_name)}
+                        title="حذف الطالب من قائمتك"
+                        className="px-3 py-1.5 rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 text-xs font-bold text-red-700 flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>حذف من قائمتي</span>
                       </button>
                     </div>
                   </div>
@@ -461,6 +546,152 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
       )}
 
 
+
+      {/* TAB: Study Materials (المذكرات) */}
+      {activeTab === 'materials' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-4">
+            <div className="bg-white border-2 border-slate-200 rounded-3xl p-6 shadow-sm">
+              <h3 className="text-lg font-black text-slate-900 mb-1">
+                📚 مذكراتي الدراسية
+              </h3>
+              <p className="text-xs text-slate-500 mb-6">
+                كل مذكرة ترفعها تظهر فوراً للطلاب في نفس الصف الدراسي
+              </p>
+
+              {myMaterials.length === 0 ? (
+                <div className="p-8 text-center text-slate-400 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+                  <Upload className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                  <p className="text-sm font-bold text-slate-700">لم ترفع أي مذكرات بعد.</p>
+                  <p className="text-xs text-slate-400 mt-1">استخدم نموذج الرفع لإضافة أول مذكرة.</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {myMaterials.map((m: CourseMaterial) => (
+                    <div key={m.id} className="py-4 flex items-center justify-between gap-4 flex-wrap">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center text-xl shrink-0">
+                          📄
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-slate-900 text-sm">{m.title}</h4>
+                          <div className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
+                            <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full font-bold">
+                              {m.grade_level || 'كل الصفوف'}
+                            </span>
+                            <span>{m.file_type || 'ملف'}</span>
+                            <span>•</span>
+                            <span>{new Date(m.created_at).toLocaleDateString('ar-EG')}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <a
+                        href={m.file_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-100 text-xs font-bold text-slate-700 flex items-center gap-1.5"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>فتح / تحميل</span>
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-white border-2 border-slate-200 rounded-3xl p-6 shadow-sm h-fit">
+            <h4 className="font-black text-slate-900 text-base mb-1">
+              ⬆️ رفع مذكرة جديدة
+            </h4>
+            <p className="text-xs text-slate-500 mb-4">
+              ارفع المذكرة كملف حقيقي (PDF أو صورة) — يتم تخزينها في Supabase Storage. لينك اليوتيوب اختياري.
+            </p>
+
+            {matMsg && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl mb-4">
+                {matMsg}
+              </div>
+            )}
+            {matError && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-800 text-xs font-bold rounded-xl mb-4">
+                {matError}
+              </div>
+            )}
+
+            <form onSubmit={handleUploadMaterial} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">اسم المذكرة:</label>
+                <input
+                  type="text"
+                  required
+                  value={matTitle}
+                  onChange={(e) => setMatTitle(e.target.value)}
+                  placeholder="مثال: مذكرة الوحدة الأولى - شرح وتمارين"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">الصف الدراسي:</label>
+                <select
+                  value={matGrade}
+                  onChange={(e) => setMatGrade(e.target.value)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
+                >
+                  <option value="الصف الأول الإعدادي">الصف الأول الإعدادي (أولى إعدادي)</option>
+                  <option value="الصف الثاني الإعدادي">الصف الثاني الإعدادي (تانية إعدادي)</option>
+                  <option value="الصف الثالث الإعدادي">الصف الثالث الإعدادي (تالته إعدادي)</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">ملف المذكرة (PDF / صورة):</label>
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.ppt,.pptx"
+                  onChange={(e) => setMatFile(e.target.files?.[0] || null)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold file:ml-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-emerald-600 file:text-white file:text-xs file:font-bold"
+                />
+                {matFile && (
+                  <p className="text-[11px] text-emerald-700 font-bold">✓ {matFile.name} ({Math.round(matFile.size / 1024)} كيلوبايت)</p>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">لينك يوتيوب (اختياري):</label>
+                <input
+                  type="url"
+                  value={matYoutubeUrl}
+                  onChange={(e) => setMatYoutubeUrl(e.target.value)}
+                  placeholder="https://youtube.com/..."
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">وصف قصير (اختياري):</label>
+                <textarea
+                  rows={2}
+                  value={matDescription}
+                  onChange={(e) => setMatDescription(e.target.value)}
+                  placeholder="محتوى المذكرة أو تعليمات للطلاب..."
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold resize-y"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={matUploading}
+                className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+              >
+                {matUploading ? 'جاري رفع الملف...' : 'رفع المذكرة ونشرها للطلاب'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* TAB 4: Homework Grading */}
       {activeTab === 'grading' && (

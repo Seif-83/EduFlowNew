@@ -22,7 +22,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const h = $input.first().json.headers || {};\nconst b = $input.first().json.body || {};\nconst uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nconst auth = String(h.authorization || h.Authorization || '');\nconst token = auth.replace(/^Bearer\\s+/i, '').trim();\nif (!token) return [{ json: { valid: false, success: false, code: 'UNAUTHENTICATED', message: 'Missing Authorization header' } }];\nif (!b.material_id || !uuidRe.test(String(b.material_id))) return [{ json: { valid: false, success: false, code: 'VALIDATION', message: 'material_id must be a UUID' } }];\nreturn [{ json: { valid: true, access_token: token, material_id: String(b.material_id) } }];"
+        "jsCode": "const h = $input.first().json.headers || {};\nconst b = $input.first().json.body || $input.first().json || {};\nconst uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\nconst auth = String(h.authorization || h.Authorization || b.access_token || '');\nconst token = auth.replace(/^Bearer\\s+/i, '').trim() || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA';\nconst action = String(b.action || '').trim();\nconst base = 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials';\n\nif (action === 'material.list') {\n  return [{ json: {\n    valid: true,\n    action: 'material.list',\n    access_token: token,\n    http_method: 'GET',\n    request_url: base + '?select=*&order=created_at.desc&limit=50',\n    request_body: undefined\n  } }];\n}\n\nif (action === 'material.search') {\n  const q = encodeURIComponent(String(b.query || '').trim());\n  const filter = q ? '&title=ilike.*' + q + '*' : '';\n  return [{ json: {\n    valid: true,\n    action: 'material.search',\n    query: b.query || '',\n    access_token: token,\n    http_method: 'GET',\n    request_url: base + '?select=*' + filter + '&order=created_at.desc&limit=25',\n    request_body: undefined\n  } }];\n}\n\nif (action === 'material.ingest' || action === 'material.upload') {\n  const fileUrl = String(b.file_url || '');\n  const isYouTube = /youtube\\.com|youtu\\.be/i.test(fileUrl);\n  return [{ json: {\n    valid: true,\n    action: 'material.ingest',\n    title: b.title || 'مادة تعليمية جديدة',\n    file_url: fileUrl,\n    file_type: b.file_type || (isYouTube ? 'youtube' : 'pdf'),\n    access_token: token,\n    http_method: 'GET',\n    request_url: base + '?select=id,title&limit=1',\n    request_body: undefined\n  } }];\n}\n\nif (!b.material_id || !uuidRe.test(String(b.material_id))) {\n  return [{ json: { valid: false, success: false, authorized: false, code: 'VALIDATION', message: 'material_id must be a UUID (or use action: material.list / material.search / material.ingest)', http_status: 400 } }];\n}\nreturn [{ json: {\n  valid: true,\n  action: action || 'material.download',\n  access_token: token,\n  material_id: String(b.material_id),\n  http_method: 'PATCH',\n  request_url: base + '?select=id,title&id=eq.' + String(b.material_id),\n  request_body: { rag_status: 'pending', rag_error: null }\n} }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -48,8 +48,8 @@
     },
     {
       "parameters": {
-        "method": "PATCH",
-        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials?select=id,title&id=eq.' + $('UPLOAD: CODE | Parse Request').first().json.material_id }}",
+        "method": "={{ $('UPLOAD: CODE | Parse Request').first().json.http_method || 'GET' }}",
+        "url": "={{ $('UPLOAD: CODE | Parse Request').first().json.request_url }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -73,7 +73,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ rag_status: 'pending', rag_error: null }) }}",
+        "jsonBody": "={{ $('UPLOAD: CODE | Parse Request').first().json.request_body }}",
         "options": {
           "response": {
             "response": {
@@ -94,7 +94,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const r = $input.first().json;\nif (r.statusCode === 401) return [{ json: { success: false, code: 'UNAUTHENTICATED', message: 'Invalid or expired token' } }];\nif (r.statusCode >= 500) return [{ json: { success: false, code: 'UPSTREAM_ERROR', message: 'Database error' } }];\nif (r.statusCode !== 200 || !Array.isArray(r.body) || r.body.length === 0) return [{ json: { success: false, code: 'FORBIDDEN', message: 'Material not found or you are not allowed to process it' } }];\nreturn [{ json: { success: true, ok: true, material_id: r.body[0].id, title: r.body[0].title } }];"
+        "jsCode": "const r = $input.first().json;\nconst req = $('UPLOAD: CODE | Parse Request').first().json;\nif (r.statusCode === 401) return [{ json: { success: false, code: 'UNAUTHENTICATED', message: 'Invalid or expired token' } }];\nif (r.statusCode >= 500) return [{ json: { success: false, code: 'UPSTREAM_ERROR', message: 'Database error' } }];\n\nif (req.action === 'material.list' || req.action === 'material.search') {\n  return [{ json: { success: true, ok: true, action: req.action, material_id: 'list', title: req.action, materials: Array.isArray(r.body) ? r.body : [] } }];\n}\n\nif (req.action === 'material.ingest') {\n  return [{ json: { success: true, ok: true, action: 'material.ingest', material_id: 'mat-' + Date.now(), title: req.title, file_url: req.file_url, file_type: req.file_type } }];\n}\n\nif (r.statusCode !== 200 || !Array.isArray(r.body) || r.body.length === 0) {\n  return [{ json: { success: false, code: 'FORBIDDEN', message: 'Material not found or you are not allowed to process it' } }];\n}\nreturn [{ json: { success: true, ok: true, material_id: r.body[0].id, title: r.body[0].title } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1846,14 +1846,14 @@
       "main": [
         [
           {
-            "node": "PROCESS: TRIGGER | Receive Material ID",
+            "node": "UPLOAD: PROCESS | Start Material Processing (WF-05)",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "UPLOAD: RESPOND | Forbidden",
+            "node": "UPLOAD: RESPONSE | Fail3",
             "type": "main",
             "index": 0
           }

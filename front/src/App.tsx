@@ -100,7 +100,7 @@ export default function App() {
 
   // 3. Main Authenticated Application Dashboard
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col selection:bg-blue-600 selection:text-white" dir="rtl">
+    <div className="min-h-screen app-shell-bg text-slate-900 font-sans flex flex-col" dir="rtl">
       {/* Sticky Top Header */}
       <Header
         currentProfile={currentProfile}
@@ -109,7 +109,7 @@ export default function App() {
       />
 
       {/* Main Role-Based Content Area */}
-      <main className="flex-1 pb-16">
+      <main className="flex-1 pb-16 animate-fade-in">
         {currentProfile.role === 'student' && (
           <StudentPortal
             currentStudent={currentProfile}

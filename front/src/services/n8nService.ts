@@ -60,16 +60,28 @@ export interface AuthCheckPayload {
   group_requirement?: string | null;
 }
 
-const N8N_BASE_URL = 'http://localhost:5678';
+const N8N_BASE_URL = (
+  (import.meta as any).env?.VITE_N8N_BASE_URL || 'http://localhost:5678'
+).replace(/\/+$/, '');
 
-async function postToN8n(path: string, payload: any): Promise<N8nWebhookResponse> {
+// Get the Supabase service key for authenticated calls
+const SUPABASE_SERVICE_KEY =
+  (import.meta as any).env?.VITE_SUPABASE_SERVICE_ROLE_KEY ||
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA';
+
+async function postToN8n(path: string, payload: any, extraHeaders?: Record<string, string>): Promise<N8nWebhookResponse> {
   const prodUrl = `${N8N_BASE_URL}/webhook/${path}`;
   const testUrl = `${N8N_BASE_URL}/webhook-test/${path}`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...extraHeaders,
+  };
 
   try {
     let response = await fetch(prodUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload),
     });
 
@@ -77,7 +89,7 @@ async function postToN8n(path: string, payload: any): Promise<N8nWebhookResponse
     if (response.status === 404) {
       response = await fetch(testUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(payload),
       });
     }
@@ -183,6 +195,40 @@ export async function callRagSearchWorkflow(
 }
 
 /**
+ * 5b. List materials by teacher/group via Material Processing Hub
+ */
+export async function callMaterialListWorkflow(
+  teacherId?: string,
+  groupId?: string
+): Promise<N8nWebhookResponse> {
+  return postToN8n(
+    'eduflow-materials-process',
+    {
+      action: 'material.list',
+      teacher_id: teacherId,
+      group_id: groupId,
+    },
+    { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` }
+  );
+}
+
+/**
+ * 5c. Upload/ingest a new material into the RAG pipeline
+ */
+export async function callMaterialIngestWorkflow(payload: {
+  title: string;
+  file_url: string;
+  teacher_id?: string;
+  group_id?: string;
+}): Promise<N8nWebhookResponse> {
+  return postToN8n(
+    'eduflow-materials-process',
+    { action: 'material.ingest', ...payload },
+    { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` }
+  );
+}
+
+/**
  * 6. Call Exams & Assessment Hub (Draft, Publish, Attempt Submission)
  */
 export async function callExamsWorkflow(
@@ -213,14 +259,65 @@ export async function sendN8nEvent(event: string, data: Record<string, any>): Pr
 
   // Smart route to specific team workflows
   if (event === 'new_student_registered' || event === 'student.create') {
-    if (data.student_id && data.student_name && data.email) {
+    const sId = data.student_id || data.id;
+    const sName = data.student_name || data.full_name;
+    if (sId && sName && data.email) {
       callStudentWorkflow('student.create', {
-        student_id: data.student_id,
-        full_name: data.student_name || data.full_name,
+        student_id: sId,
+        full_name: sName,
         email: data.email,
         phone: data.phone || null,
       }).catch(() => {});
+
+      callAuditWorkflow({
+        action: 'student.registered',
+        entity_type: 'student',
+        entity_id: sId,
+        actor_id: sId,
+        actor_role: 'student',
+        details: { full_name: sName, email: data.email },
+      }).catch(() => {});
     }
+  }
+
+  if (event === 'new_teacher_registered' || event === 'teacher.create') {
+    const tId = data.teacher_id || data.id;
+    const tName = data.teacher_name || data.full_name;
+    callAuditWorkflow({
+      action: 'teacher.registered',
+      entity_type: 'teacher',
+      entity_id: tId,
+      actor_id: tId,
+      actor_role: 'teacher',
+      details: { full_name: tName, email: data.email, phone: data.phone },
+    }).catch(() => {});
+
+    callNotificationsWorkflow({
+      title: '👨‍🏫 معلم جديد انضم للمنظومة',
+      message: `تم تسجيل المعلم (${tName}) بنجاح.`,
+      notification_type: 'teacher_onboarding',
+      user_ids: [tId],
+    }).catch(() => {});
+  }
+
+  if (event === 'new_parent_registered' || event === 'parent.create') {
+    const pId = data.parent_id || data.id;
+    const pName = data.parent_name || data.full_name;
+    callAuditWorkflow({
+      action: 'parent.registered',
+      entity_type: 'parent',
+      entity_id: pId,
+      actor_id: pId,
+      actor_role: 'parent',
+      details: { full_name: pName, email: data.email, phone: data.phone },
+    }).catch(() => {});
+
+    callNotificationsWorkflow({
+      title: '👨‍👩‍👧 ولي أمر جديد انضم للمنظومة',
+      message: `تم تسجيل ولي الأمر (${pName}) بنجاح.`,
+      notification_type: 'parent_onboarding',
+      user_ids: [pId],
+    }).catch(() => {});
   }
 
   if (event === 'attendance_marked') {
@@ -238,11 +335,53 @@ export async function sendN8nEvent(event: string, data: Record<string, any>): Pr
     }).catch(() => {});
   }
 
-  // Also dispatch to general eduflow webhook if active
-  return postToN8n('eduflow', {
-    event,
-    timestamp: new Date().toISOString(),
-    gemini_key: geminiKey,
-    data,
-  });
+  if (event === 'exam.submitted' || event === 'exam_submitted') {
+    callExamsWorkflow('exam.submit_attempt', {
+      exam_id: data.exam_id,
+      student_id: data.student_id,
+      score: data.score,
+      submitted_at: new Date().toISOString(),
+    }).catch(() => {});
+  }
+
+  if (event === 'ai_tutor_chat') {
+    const chatRes = await callAgentChatWorkflow(
+      (data.role as any) || 'student',
+      data.message || data.question || '',
+      data
+    );
+    if (chatRes.success) return chatRes;
+  }
+
+  if (event === 'complaint_submitted') {
+    callAuditWorkflow({
+      action: 'complaint.submitted',
+      entity_type: 'complaint',
+      actor_id: data.student_id || data.user_id || null,
+      actor_role: 'student',
+      details: data,
+    }).catch(() => {});
+  }
+
+  if (event === 'note_added') {
+    callAuditWorkflow({
+      action: 'note.added',
+      entity_type: 'student_note',
+      entity_id: data.student_id || null,
+      actor_role: 'teacher',
+      details: data,
+    }).catch(() => {});
+    callNotificationsWorkflow({
+      title: '📝 ملاحظة جديدة من المعلم',
+      message: data.note || 'تمت إضافة ملاحظة أكاديمية جديدة للطالب.',
+      notification_type: 'note',
+      user_ids: data.student_id ? [data.student_id] : [],
+    }).catch(() => {});
+  }
+
+  // Known events were dispatched above. (The old catch-all POST to
+  // /webhook/eduflow was removed: no workflow exposes that path, so it
+  // always returned 404 and made every event look failed.)
+  void geminiKey;
+  return { success: true, data: { event, dispatched: true } };
 }

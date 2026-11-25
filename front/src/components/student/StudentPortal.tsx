@@ -41,7 +41,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   onUpdateStudent,
 }) => {
   const [activeTab, setActiveTab] = useState<
-    'sessions' | 'assignments' | 'attendance' | 'ai_chat' | 'generator' | 'payments' | 'complaints'
+    'sessions' | 'materials' | 'assignments' | 'attendance' | 'ai_chat' | 'generator' | 'payments' | 'complaints'
   >('sessions');
 
   // Modals state
@@ -331,7 +331,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const attPercentage = Math.round(((presentCount + lateCount) / totalAtt) * 100);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 stagger">
       {/* Modern Student Hero Card */}
       <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-950 text-white rounded-3xl p-6 sm:p-7 shadow-xl border border-slate-800 relative overflow-hidden">
         {/* Ambient lighting */}
@@ -466,6 +466,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
         {[
           { id: 'sessions', label: '🎬 المحاضرات والفيديوهات', icon: Video },
+          { id: 'materials', label: '📚 المذكرات الدراسية', icon: BookOpen },
           { id: 'assignments', label: '📝 الواجبات والأنشطة', icon: FileText },
           { id: 'attendance', label: '📊 سجل الحضور والغياب', icon: CalendarCheck },
           { id: 'generator', label: '⚡ المولد الذكي والبطاقات 3D', icon: Sparkles },
@@ -490,6 +491,64 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
           );
         })}
       </div>
+
+      {/* TAB: Study Materials (المذكرات) */}
+      {activeTab === 'materials' && (
+        <div className="bg-white border-2 border-slate-200 rounded-3xl p-6 shadow-sm">
+          <h3 className="text-lg font-black text-slate-900 mb-1">
+            📚 المذكرات الدراسية - {currentStudent.grade_level || 'صفك الدراسي'}
+          </h3>
+          <p className="text-xs text-slate-500 mb-6">
+            كل المذكرات التي رفعها معلموك لصفك الدراسي — حمّلها أو افتحها مباشرة
+          </p>
+
+          {db.getMaterialsForGrade(currentStudent.grade_level || '').length === 0 ? (
+            <div className="p-8 text-center text-slate-400 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+              <BookOpen className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+              <p className="text-sm font-bold text-slate-700">لا توجد مذكرات متاحة لصفك حالياً.</p>
+              <p className="text-xs text-slate-400 mt-1">عند رفع معلمك لأي مذكرة ستظهر هنا فوراً.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {db.getMaterialsForGrade(currentStudent.grade_level || '').map((m) => (
+                <div key={m.id} className="py-4 flex items-center justify-between gap-4 flex-wrap">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center text-xl shrink-0">
+                      📄
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-slate-900 text-sm">{m.title}</h4>
+                      <div className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
+                        {m.grade_level && (
+                          <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full font-bold">
+                            {m.grade_level}
+                          </span>
+                        )}
+                        <span>{m.file_type || 'ملف'}</span>
+                        {m.description && (
+                          <>
+                            <span>•</span>
+                            <span>{m.description}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <a
+                    href={m.file_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1.5"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>{m.file_type === 'YouTube' ? 'مشاهدة' : 'فتح / تحميل'}</span>
+                  </a>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* TAB 1: AI Lesson & Quiz Generator (Original Core Feature from HTML) */}
       {activeTab === 'generator' && (

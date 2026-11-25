@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Play, AlertTriangle, CheckCircle, Video } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle, Video, ExternalLink } from 'lucide-react';
 import { Session } from '../../types/database';
 
 interface VideoPlayerModalProps {
@@ -9,6 +9,44 @@ interface VideoPlayerModalProps {
   onClose: () => void;
 }
 
+/**
+ * Extract YouTube embed URL from any YouTube link format (watch?v=, youtu.be/, shorts/, live/, embed/)
+ */
+function getYouTubeEmbedUrl(rawUrl?: string): string | null {
+  if (!rawUrl) return null;
+  const url = rawUrl.trim();
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, '').toLowerCase();
+
+    let videoId: string | null = null;
+    if (host === 'youtu.be') {
+      videoId = parsed.pathname.slice(1).split('/')[0] || null;
+    } else if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'youtube-nocookie.com') {
+      if (parsed.pathname.startsWith('/embed/')) {
+        videoId = parsed.pathname.split('/embed/')[1]?.split('/')[0] || null;
+      } else if (parsed.pathname.startsWith('/shorts/')) {
+        videoId = parsed.pathname.split('/shorts/')[1]?.split('/')[0] || null;
+      } else if (parsed.pathname.startsWith('/live/')) {
+        videoId = parsed.pathname.split('/live/')[1]?.split('/')[0] || null;
+      } else {
+        videoId = parsed.searchParams.get('v');
+      }
+    }
+
+    if (videoId) {
+      return `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`;
+    }
+  } catch {
+    // Fallback regex if URL constructor fails
+    const m = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+    if (m?.[1]) {
+      return `https://www.youtube.com/embed/${m[1]}?autoplay=1&rel=0`;
+    }
+  }
+  return null;
+}
+
 export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   session,
   remainingPlays,
@@ -16,6 +54,8 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   onClose,
 }) => {
   if (!session) return null;
+
+  const youtubeEmbedUrl = getYouTubeEmbedUrl(session.video_url);
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
@@ -44,22 +84,32 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
 
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors"
+            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Video Player */}
+        {/* Video Player (YouTube Iframe or Direct HTML5 Video) */}
         <div className="bg-black relative aspect-video flex items-center justify-center">
-          <video
-            controls
-            autoPlay
-            className="w-full h-full object-contain"
-            src={session.video_url}
-          >
-            عذراً، متصفحك لا يدعم تشغيل الفيديو.
-          </video>
+          {youtubeEmbedUrl ? (
+            <iframe
+              src={youtubeEmbedUrl}
+              title={session.title}
+              className="w-full h-full border-0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+            />
+          ) : (
+            <video
+              controls
+              autoPlay
+              className="w-full h-full object-contain"
+              src={session.video_url}
+            >
+              عذراً، متصفحك لا يدعم تشغيل الفيديو.
+            </video>
+          )}
         </div>
 
         {/* Info & Footer */}
@@ -68,10 +118,23 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
             <h4 className="font-bold text-slate-900 text-sm">
               معلومات الحصة والتنبيهات الأكاديمية
             </h4>
-            <span className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1 rounded-full font-bold flex items-center gap-1">
-              <CheckCircle className="w-3.5 h-3.5" />
-              <span>جاري توثيق وقت المشاهدة للطالب</span>
-            </span>
+            <div className="flex items-center gap-2">
+              {session.video_url && (
+                <a
+                  href={session.video_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-3 py-1 rounded-full font-bold flex items-center gap-1 hover:bg-blue-100 transition-colors"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span>فتح الرابط</span>
+                </a>
+              )}
+              <span className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1 rounded-full font-bold flex items-center gap-1">
+                <CheckCircle className="w-3.5 h-3.5" />
+                <span>جاري توثيق وقت المشاهدة للطالب</span>
+              </span>
+            </div>
           </div>
 
           <p className="text-xs text-slate-600 leading-relaxed mb-4">
@@ -89,7 +152,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         <div className="p-4 bg-white border-t border-slate-200 flex justify-end">
           <button
             onClick={onClose}
-            className="px-5 py-2 rounded-xl text-sm font-bold bg-slate-900 text-white hover:bg-slate-800 transition-colors"
+            className="px-5 py-2 rounded-xl text-sm font-bold bg-slate-900 text-white hover:bg-slate-800 transition-colors cursor-pointer"
           >
             إنهاء المشاهدة والعودة
           </button>

@@ -20,6 +20,7 @@ import {
   BookOpen,
   FileText,
   Bell,
+  Trash2,
 } from 'lucide-react';
 import { Profile, StudentPayment } from '../../types/database';
 import { db } from '../../services/mockDatabase';
@@ -62,6 +63,20 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
   const [waivePaymentId, setWaivePaymentId] = useState('');
   const [waiveReason, setWaiveReason] = useState('');
   const [waiveSuccessMsg, setWaiveSuccessMsg] = useState('');
+
+  // User management actions (delete / change role)
+  const [userActionMsg, setUserActionMsg] = useState('');
+  const handleDeleteUser = (userId: string, name: string) => {
+    if (!window.confirm(`حذف (${name}) نهائياً؟ سيتم مسح كل بياناته من المنظومة ولا يمكن التراجع.`)) return;
+    const res = db.deleteUserByAdmin(userId, currentAdmin.id);
+    setUserActionMsg(res.message);
+    setTimeout(() => setUserActionMsg(''), 3500);
+  };
+  const handleChangeUserRole = (userId: string, newRole: 'student' | 'teacher' | 'parent' | 'assistant' | 'admin') => {
+    const res = db.updateUserRoleByAdmin(userId, newRole, currentAdmin.id);
+    setUserActionMsg(res.message);
+    setTimeout(() => setUserActionMsg(''), 3500);
+  };
 
   // Complaint Resolution
   const [selectedComplaintId, setSelectedComplaintId] = useState('');
@@ -309,7 +324,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 stagger">
       {/* Admin Header */}
       <div className="bg-white border-2 border-slate-200 rounded-3xl p-5 sm:p-6 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
@@ -498,6 +513,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
           </div>
 
           <div className="overflow-x-auto">
+            {userActionMsg && (
+              <div className="p-3 mb-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl">
+                {userActionMsg}
+              </div>
+            )}
             <table className="w-full text-right text-xs">
               <thead>
                 <tr className="border-b border-slate-200 text-slate-500 font-bold">
@@ -506,6 +526,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
                   <th className="pb-3">الهاتف</th>
                   <th className="pb-3">الصلاحية</th>
                   <th className="pb-3">المرحلة / البيانات</th>
+                  <th className="pb-3">إجراءات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -541,6 +562,32 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
                       </span>
                     </td>
                     <td className="py-3.5 text-slate-500">{u.grade_level || 'مسجل بالنظام'}</td>
+                    <td className="py-3.5">
+                      {u.role === 'admin' ? (
+                        <span className="text-slate-400 text-[11px] font-bold">حساب محمي</span>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={u.role}
+                            onChange={(e) => handleChangeUserRole(u.id, e.target.value as any)}
+                            title="تغيير الصلاحية"
+                            className="p-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[11px] font-bold text-slate-700 cursor-pointer"
+                          >
+                            <option value="student">طالب</option>
+                            <option value="teacher">معلم</option>
+                            <option value="parent">ولي أمر</option>
+                            <option value="assistant">مساعد</option>
+                          </select>
+                          <button
+                            onClick={() => handleDeleteUser(u.id, u.full_name)}
+                            title="حذف المستخدم نهائياً"
+                            className="p-1.5 rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 text-red-600 cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

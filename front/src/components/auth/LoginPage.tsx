@@ -46,7 +46,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   // Parent specific login state (Student Phone / ID)
   const [studentPhoneForParent, setStudentPhoneForParent] = useState('');
 
-  // Register form state (Student ONLY)
+  // Register form state (Student, Teacher, Parent)
+  const [regRole, setRegRole] = useState<'student' | 'teacher' | 'parent'>('student');
   const [regName, setRegName] = useState('');
   const [regPhone, setRegPhone] = useState('');
   const [regEmail, setRegEmail] = useState('');
@@ -54,6 +55,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [regGrade, setRegGrade] = useState('الصف الثاني الإعدادي');
   const [regTeacherId, setRegTeacherId] = useState('tea-1');
   const [regGroupId, setRegGroupId] = useState('g-1');
+  const [regSubject, setRegSubject] = useState('العلوم والفيزياء');
+  const [regLinkedStudentPhone, setRegLinkedStudentPhone] = useState('');
   const [regSuccess, setRegSuccess] = useState('');
 
   const registeredStudents = db.getStudents();
@@ -103,26 +106,32 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     setLoginError('');
     setIsLoading(true);
 
+    // Try the live Supabase lookup first (works from any device, not just
+    // the browser where the student registered), then fall back to local.
     setTimeout(() => {
-      const res = db.loginParentByStudentIdentifier(studentPhoneForParent);
-      setIsLoading(false);
-      if (res.success && res.profile) {
-        onLoginSuccess(res.profile);
-      } else {
-        setLoginError(res.error || 'لم يتم العثور على طالب مسجل بهذا الرقم.');
-      }
+      db.findStudentByPhoneRemote(studentPhoneForParent)
+        .catch(() => null)
+        .then(() => {
+          const res = db.loginParentByStudentIdentifier(studentPhoneForParent);
+          setIsLoading(false);
+          if (res.success && res.profile) {
+            onLoginSuccess(res.profile);
+          } else {
+            setLoginError(res.error || 'لم يتم العثور على طالب مسجل بهذا الرقم.');
+          }
+        });
     }, 250);
   };
 
-  // Student Standalone Registration (With password)
-  const handleRegisterSubmit = (e: React.FormEvent) => {
+  // Standalone Registration (Student, Teacher, Parent)
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!regName.trim()) {
-      setLoginError('يرجى كتابة الاسم الرباعي للطالب');
+      setLoginError(`يرجى كتابة الاسم الكامل ${regRole === 'student' ? 'للطالب' : regRole === 'teacher' ? 'للمعلم' : 'لولي الأمر'}`);
       return;
     }
     if (!regPhone.trim()) {
-      setLoginError('يرجى إدخال رقم هاتف الطالب');
+      setLoginError('يرجى إدخال رقم الهاتف للتواصل وتسجيل الدخول');
       return;
     }
     if (!regPassword.trim()) {
@@ -131,25 +140,34 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     }
 
     setIsLoading(true);
-    setTimeout(() => {
+    setLoginError('');
+
+    try {
       const pwd = regPassword.trim() || '123456';
-      const newStudent = db.registerStudentStandalone({
+      const newProfile = await db.registerUserStandalone({
         full_name: regName.trim(),
         phone: regPhone.trim(),
         email: regEmail.trim(),
         password: pwd,
+        role: regRole,
         grade_level: regGrade,
         group_id: regGroupId,
         teacher_id: regTeacherId,
+        subject: regSubject,
+        student_phone_for_parent: regLinkedStudentPhone.trim(),
       });
 
       setIsLoading(false);
-      setRegSuccess(`🎉 مبارك يا ${newStudent.full_name}! تم إنشاء حسابك بنجاح. كودك هو: #${newStudent.id} • كلمة المرور: "${pwd}". جاري نقلك إلى لوحة التعلم...`);
+      const roleLabel = regRole === 'student' ? 'طالب' : regRole === 'teacher' ? 'معلم' : 'ولي أمر';
+      setRegSuccess(`🎉 مبارك يا ${newProfile.full_name}! تم إنشاء حسابك (${roleLabel}) بنجاح وربطه بالسحابة و n8n. جاري نقلك إلى لوحة التحكم...`);
 
       setTimeout(() => {
-        onLoginSuccess(newStudent);
+        onLoginSuccess(newProfile);
       }, 1200);
-    }, 300);
+    } catch (err: any) {
+      setIsLoading(false);
+      setLoginError(err?.message || 'حدث خطأ أثناء التسجيل، يرجى المحاولة مرة أخرى.');
+    }
   };
 
   return (
@@ -158,8 +176,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       dir="rtl"
     >
       {/* Background ambient lighting */}
-      <div className="absolute top-0 right-1/4 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-0 right-1/4 w-96 h-96 bg-emerald-600/10 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-0 left-1/4 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
+      <div
+        className="absolute inset-0 pointer-events-none opacity-[0.15]"
+        style={{
+          backgroundImage:
+            'linear-gradient(rgb(148 163 184 / 0.08) 1px, transparent 1px), linear-gradient(90deg, rgb(148 163 184 / 0.08) 1px, transparent 1px)',
+          backgroundSize: '44px 44px',
+          maskImage: 'radial-gradient(ellipse 75% 60% at 50% 35%, black, transparent)',
+          WebkitMaskImage: 'radial-gradient(ellipse 75% 60% at 50% 35%, black, transparent)',
+        }}
+      />
 
       {/* Top back button */}
       {onBackToHome && (
@@ -176,7 +204,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
       <div className="w-full max-w-xl relative z-10">
         {/* Brand Header */}
-        <div className="flex flex-col items-center justify-center text-center mb-6">
+        <div className="flex flex-col items-center justify-center text-center mb-6 animate-fade-up">
           <EduFlowLogo size="hero" theme="dark" showSubtitle={true} className="mb-2" />
           <p className="text-slate-400 text-xs sm:text-sm mt-2 max-w-md mx-auto leading-relaxed">
             منظومة التعليم والمتابعة الأذكى — تسجيل الدخول المباشر
@@ -184,7 +212,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         </div>
 
         {/* Clean Center Auth Card */}
-        <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl">
+        <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-black/50 backdrop-blur-xl animate-fade-up" style={{ animationDelay: '0.12s' }}>
           {/* Main Role Selector Tabs */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 p-1 bg-slate-950/80 rounded-2xl mb-6 border border-slate-800/80 text-xs font-bold">
             <button
@@ -580,17 +608,66 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             </form>
           )}
 
-          {/* 4. STUDENT REGISTRATION FORM (STUDENT DETAILS ONLY + PASSWORD) */}
+          {/* 4. UNIFIED REGISTRATION FORM (STUDENT / TEACHER / PARENT) */}
           {activeTab === 'register' && (
             <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
               <div className="p-3 bg-teal-950/30 border border-teal-900/40 rounded-xl text-xs text-teal-300 flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-teal-400 shrink-0" />
-                <span>تسجيل طالب جديد: اكتب بياناتك الشخصية واختر كلمة مرور لحسابك.</span>
+                <span>
+                  {regRole === 'student' && 'تسجيل طالب جديد: اكتب بياناتك الشخصية واختر كلمة مرور لحسابك.'}
+                  {regRole === 'teacher' && 'تسجيل معلم جديد: سجل بياناتك ومادة التخصص لتفعيل لوحة المعلم.'}
+                  {regRole === 'parent' && 'تسجيل ولي أمر: سجل بياناتك واربط حسابك برقم هاتف ابنك للمتابعة.'}
+                </span>
+              </div>
+
+              {/* Role Selector Pills */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  نوع الحساب المراد إنشاؤه *
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRegRole('student')}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      regRole === 'student'
+                        ? 'bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-600/30'
+                        : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <span>👨‍🎓</span>
+                    <span>طالب</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRegRole('teacher')}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      regRole === 'teacher'
+                        ? 'bg-teal-600 text-white border-teal-500 shadow-lg shadow-teal-600/30'
+                        : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <span>👨‍🏫</span>
+                    <span>معلم</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRegRole('parent')}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      regRole === 'parent'
+                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-lg shadow-emerald-600/30'
+                        : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <span>👨‍👩‍👧</span>
+                    <span>ولي أمر</span>
+                  </button>
+                </div>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  الاسم الرباعي للطالب *
+                  {regRole === 'student' ? 'الاسم الرباعي للطالب *' : regRole === 'teacher' ? 'اسم المعلم الكامل *' : 'اسم ولي الأمر الكامل *'}
                 </label>
                 <div className="relative">
                   <User className="absolute right-3.5 top-3 w-4 h-4 text-slate-400" />
@@ -599,7 +676,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     required
                     value={regName}
                     onChange={(e) => setRegName(e.target.value)}
-                    placeholder="مثال: يوسف حسام الدين السيد"
+                    placeholder={regRole === 'student' ? 'مثال: يوسف حسام الدين السيد' : regRole === 'teacher' ? 'مثال: أ. محمد أحمد محمود' : 'مثال: حسام الدين السيد'}
                     className="w-full pr-10 pl-3 py-2.5 rounded-xl bg-slate-950/80 border border-slate-700 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
                   />
                 </div>
@@ -608,7 +685,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    رقم هاتف الطالب *
+                    رقم الهاتف للتواصل والدخول *
                   </label>
                   <div className="relative">
                     <Phone className="absolute right-3.5 top-3 w-4 h-4 text-slate-400" />
@@ -623,23 +700,56 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    الصف الدراسي *
-                  </label>
-                  <select
-                    value={regGrade}
-                    onChange={(e) => setRegGrade(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950/80 border border-slate-700 text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-                  >
-                    <option value="الصف الأول الإعدادي">الصف الأول الإعدادي</option>
-                    <option value="الصف الثاني الإعدادي">الصف الثاني الإعدادي</option>
-                    <option value="الصف الثالث الإعدادي">الصف الثالث الإعدادي</option>
-                    <option value="الصف الأول الثانوي">الصف الأول الثانوي</option>
-                    <option value="الصف الثاني الثانوي">الصف الثاني الثانوي</option>
-                    <option value="الصف الثالث الثانوي">الصف الثالث الثانوي</option>
-                  </select>
-                </div>
+                {regRole === 'student' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      الصف الدراسي *
+                    </label>
+                    <select
+                      value={regGrade}
+                      onChange={(e) => setRegGrade(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-950/80 border border-slate-700 text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    >
+                      <option value="الصف الأول الإعدادي">الصف الأول الإعدادي</option>
+                      <option value="الصف الثاني الإعدادي">الصف الثاني الإعدادي</option>
+                      <option value="الصف الثالث الإعدادي">الصف الثالث الإعدادي</option>
+                      <option value="الصف الأول الثانوي">الصف الأول الثانوي</option>
+                      <option value="الصف الثاني الثانوي">الصف الثاني الثانوي</option>
+                      <option value="الصف الثالث الثانوي">الصف الثالث الثانوي</option>
+                    </select>
+                  </div>
+                )}
+
+                {regRole === 'teacher' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      مادة التخصص *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={regSubject}
+                      onChange={(e) => setRegSubject(e.target.value)}
+                      placeholder="مثال: مادة الفيزياء والعلوم"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-950/80 border border-slate-700 text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                  </div>
+                )}
+
+                {regRole === 'parent' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      رقم هاتف الطالب المراد متابعته (اختياري)
+                    </label>
+                    <input
+                      type="tel"
+                      value={regLinkedStudentPhone}
+                      onChange={(e) => setRegLinkedStudentPhone(e.target.value)}
+                      placeholder="010XXXXXXXX"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-950/80 border border-slate-700 text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono"
+                    />
+                  </div>
+                )}
               </div>
 
               <div>
@@ -662,56 +772,58 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 </p>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  اختر المعلم والمادة التي ترغب بدراستها *
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRegTeacherId('tea-1');
-                      setRegGroupId('g-1');
-                    }}
-                    className={`p-3 rounded-2xl border text-right transition-all cursor-pointer flex items-center gap-3 ${
-                      regTeacherId === 'tea-1'
-                        ? 'bg-blue-950/70 border-blue-500 ring-2 ring-blue-500/30'
-                        : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-blue-600/20 text-blue-400 flex items-center justify-center text-xl shrink-0">
-                      👨‍🏫
-                    </div>
-                    <div>
-                      <div className="font-bold text-xs sm:text-sm text-white">أ. أحمد رضوان</div>
-                      <div className="text-[11px] text-blue-400">مادة العلوم والفيزياء</div>
-                      <div className="text-[10px] text-slate-400 mt-0.5">مجموعة الأوائل</div>
-                    </div>
-                  </button>
+              {regRole === 'student' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    اختر المعلم والمادة التي ترغب بدراستها *
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRegTeacherId('tea-1');
+                        setRegGroupId('g-1');
+                      }}
+                      className={`p-3 rounded-2xl border text-right transition-all cursor-pointer flex items-center gap-3 ${
+                        regTeacherId === 'tea-1'
+                          ? 'bg-blue-950/70 border-blue-500 ring-2 ring-blue-500/30'
+                          : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-blue-600/20 text-blue-400 flex items-center justify-center text-xl shrink-0">
+                        👨‍🏫
+                      </div>
+                      <div>
+                        <div className="font-bold text-xs sm:text-sm text-white">أ. أحمد رضوان</div>
+                        <div className="text-[11px] text-blue-400">مادة العلوم والفيزياء</div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">مجموعة الأوائل</div>
+                      </div>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRegTeacherId('tea-2');
-                      setRegGroupId('g-2');
-                    }}
-                    className={`p-3 rounded-2xl border text-right transition-all cursor-pointer flex items-center gap-3 ${
-                      regTeacherId === 'tea-2'
-                        ? 'bg-purple-950/70 border-purple-500 ring-2 ring-purple-500/30'
-                        : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-purple-600/20 text-purple-400 flex items-center justify-center text-xl shrink-0">
-                      👩‍🏫
-                    </div>
-                    <div>
-                      <div className="font-bold text-xs sm:text-sm text-white">د. مروة محمود</div>
-                      <div className="text-[11px] text-purple-400">مادة الرياضيات والجبر</div>
-                      <div className="text-[10px] text-slate-400 mt-0.5">مجموعة المتفوقين</div>
-                    </div>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRegTeacherId('tea-2');
+                        setRegGroupId('g-2');
+                      }}
+                      className={`p-3 rounded-2xl border text-right transition-all cursor-pointer flex items-center gap-3 ${
+                        regTeacherId === 'tea-2'
+                          ? 'bg-purple-950/70 border-purple-500 ring-2 ring-purple-500/30'
+                          : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-purple-600/20 text-purple-400 flex items-center justify-center text-xl shrink-0">
+                        👩‍🏫
+                      </div>
+                      <div>
+                        <div className="font-bold text-xs sm:text-sm text-white">د. مروة محمود</div>
+                        <div className="text-[11px] text-purple-400">مادة الرياضيات والجبر</div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">مجموعة المتفوقين</div>
+                      </div>
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
@@ -723,7 +835,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     type="email"
                     value={regEmail}
                     onChange={(e) => setRegEmail(e.target.value)}
-                    placeholder="student@example.com"
+                    placeholder={regRole === 'student' ? 'student@example.com' : regRole === 'teacher' ? 'teacher@example.com' : 'parent@example.com'}
                     className="w-full pr-10 pl-3 py-2 rounded-xl bg-slate-950/80 border border-slate-700 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
                   />
                 </div>
@@ -739,7 +851,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                   ) : (
                     <>
-                      <span>إنشاء حساب الطالب وتفعيل المنصة فوراً</span>
+                      <span>
+                        {regRole === 'student' && 'إنشاء حساب الطالب وتفعيل المنصة فوراً'}
+                        {regRole === 'teacher' && 'إنشاء حساب المعلم وتفعيل المنظومة فوراً'}
+                        {regRole === 'parent' && 'إنشاء حساب ولي الأمر وتفعيل المتابعة فوراً'}
+                      </span>
                       <CheckCircle className="w-4 h-4" />
                     </>
                   )}

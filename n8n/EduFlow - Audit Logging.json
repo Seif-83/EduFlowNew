@@ -159,6 +159,292 @@
         896,
         96
       ]
+    },
+    {
+      "id": "webhook-notifications-1795566068980",
+      "name": "Webhook – Notifications",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        496,
+        396
+      ],
+      "parameters": {
+        "path": "eduflow-notifications",
+        "httpMethod": "POST",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "id": "code-notifications-1795566068980",
+      "name": "CODE – Process Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        696,
+        396
+      ],
+      "parameters": {
+        "jsCode": "// EduFlow Notifications Hub - fan out and persist each notification row.\nconst raw = $input.first().json;\nconst b = (raw.body && typeof raw.body === 'object') ? raw.body : raw;\nconst isUuid = (v) => typeof v === 'string' &&\n  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\n\nconst title = b.title || 'EduFlow Notification';\nconst message = b.message || '';\nconst ntype = b.notification_type || 'general';\nconst related = b.related_url || null;\nconst userIds = Array.isArray(b.user_ids) ? b.user_ids.filter(isUuid) : [];\n\nif (userIds.length === 0) {\n  // Keep one item flowing so the HTTP node always produces output.\n  return [{ json: { _skip: true, reason: 'no valid UUID user_ids' } }];\n}\n\nreturn userIds.map((uid) => ({ json: {\n  _skip: false,\n  _body: JSON.stringify({\n    user_id: uid,\n    title,\n    message,\n    notification_type: ntype,\n    related_url: related,\n    is_read: false,\n  })\n} }));"
+      }
+    },
+    {
+      "id": "respond-notifications-1795566068980",
+      "name": "Respond – Notifications",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        396
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "webhook-exams-1795566068981",
+      "name": "Webhook – Exams",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        496,
+        596
+      ],
+      "parameters": {
+        "path": "eduflow-exams",
+        "httpMethod": "POST",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "id": "code-exams-1795566068981",
+      "name": "CODE – Process Exam",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        696,
+        596
+      ],
+      "parameters": {
+        "jsCode": "// EduFlow Exams & Assessment Hub - real Supabase persistence\nconst raw = $input.first().json;\nconst b = (raw.body && typeof raw.body === 'object') ? raw.body : raw;\nconst action = String(b.action || 'exam.create_draft').trim();\nconst BASE = 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1';\nconst isUuid = (v) => typeof v === 'string' &&\n  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\n\nconst fail = (message) => [{ json: { valid: false, success: false, error: message } }];\nconst ok = (method, url, body, extra) => [{ json: {\n  valid: true, _method: method, _url: url, _body: JSON.stringify(body), ...(extra || {}) } }];\n\nif (action === 'exam.create_draft' || action === 'exam.create') {\n  if (!isUuid(b.session_id)) return fail('session_id (UUID) is required to create an exam.');\n  const body = {\n    session_id: b.session_id,\n    title: b.title || 'اختبار EduFlow',\n    passing_score: typeof b.passing_score === 'number' ? b.passing_score : 70,\n    duration_minutes: b.duration_minutes || 15,\n    is_published: !!b.is_published,\n  };\n  for (const k of ['subject','grade_level','deadline','creator_role','creation_mode','curriculum_type','material_url']) {\n    if (b[k] !== undefined && b[k] !== null) body[k] = b[k];\n  }\n  return ok('POST', BASE + '/exams', body, { action });\n}\n\nif (action === 'exam.publish') {\n  if (!isUuid(b.exam_id)) return fail('exam_id (UUID) is required to publish an exam.');\n  return ok('PATCH', BASE + '/exams?id=eq.' + b.exam_id, { is_published: true }, { action });\n}\n\nif (action === 'exam.start_attempt') {\n  if (!isUuid(b.exam_id) || !isUuid(b.student_id)) return fail('exam_id and student_id (UUID) are required.');\n  return ok('POST', BASE + '/exam_attempts', {\n    exam_id: b.exam_id, student_id: b.student_id, started_at: new Date().toISOString(),\n  }, { action });\n}\n\nif (action === 'exam.submit_attempt') {\n  if (!isUuid(b.exam_id) || !isUuid(b.student_id)) return fail('exam_id and student_id (UUID) are required.');\n  const score = typeof b.score === 'number' ? b.score : (parseFloat(b.score) || 0);\n  const total = typeof b.total_score === 'number' ? b.total_score : (parseFloat(b.total_score) || 0);\n  const pct = total > 0 ? (score / total) * 100 : 0;\n  const body = {\n    exam_id: b.exam_id,\n    student_id: b.student_id,\n    score,\n    started_at: b.started_at || new Date().toISOString(),\n    submitted_at: b.submitted_at || new Date().toISOString(),\n    passed: b.passed !== undefined ? !!b.passed : (total > 0 ? pct >= 70 : score >= 70),\n  };\n  if (total > 0) body.total_score = total;\n  return ok('POST', BASE + '/exam_attempts', body, { action });\n}\n\nreturn fail('Unsupported action: ' + action);"
+      }
+    },
+    {
+      "id": "respond-exams-1795566068981",
+      "name": "Respond – Exams",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        596
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "9755cbdb-05d1-48a2-8229-de2d76f28648",
+              "leftValue": "={{ $json.valid === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "aa67d175-cdcf-4934-b5fd-6eddab92339c",
+      "name": "IF – Exam Request Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        896,
+        596
+      ]
+    },
+    {
+      "parameters": {
+        "method": "={{ $json._method }}",
+        "url": "={{ $json._url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json._body }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "95971e74-4486-4953-82fd-1bd276a00405",
+      "name": "DB – Write Exam to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        500
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "jsCode": "const inItems = $input.all();\nconst req = $('CODE – Process Exam').first().json;\nconst first = inItems[0] ? inItems[0].json : null;\nconst row = Array.isArray(first) ? first[0] : first;\nreturn [{ json: {\n  success: true,\n  workflow: 'EXAMS-HUB',\n  action: req.action,\n  persisted: true,\n  row: row || null,\n  processed_at: new Date().toISOString()\n} }];"
+      },
+      "id": "6b171888-f771-4784-84e2-f657405fb9b1",
+      "name": "CODE – Exam Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "2aadfaff-96fd-4e0b-9405-93bfd4b8fa6e",
+              "leftValue": "={{ $json._skip === false }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8c46d4d0-e873-441e-9cd5-66352bc3d358",
+      "name": "IF – Has Recipients",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        700,
+        396
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/notifications",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json._skip ? '{}' : $json._body }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "44f87e73-cbfe-4945-8d93-d0c26b820335",
+      "name": "DB – Insert Notifications into Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        920,
+        396
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const req = $('CODE – Process Notification').first().json;\nif (req && req._skip) {\n  return [{ json: { success: true, workflow: 'NOTIFICATIONS-HUB', inserted: 0, skipped: true, reason: req.reason || 'no recipients' } }];\n}\nconst rows = $input.all().map(i => i.json).filter(j => j && !j.error);\nreturn [{ json: {\n  success: true,\n  workflow: 'NOTIFICATIONS-HUB',\n  inserted: rows.length,\n  persisted: true,\n  timestamp: new Date().toISOString()\n} }];"
+      },
+      "id": "48194c58-d7d9-4293-80aa-264d7dacea52",
+      "name": "CODE – Notifications Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        340
+      ]
     }
   ],
   "pinData": {},
@@ -223,6 +509,130 @@
         [
           {
             "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook – Notifications": {
+      "main": [
+        [
+          {
+            "node": "CODE – Process Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CODE – Process Notification": {
+      "main": [
+        [
+          {
+            "node": "IF – Has Recipients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook – Exams": {
+      "main": [
+        [
+          {
+            "node": "CODE – Process Exam",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CODE – Process Exam": {
+      "main": [
+        [
+          {
+            "node": "IF – Exam Request Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF – Exam Request Valid": {
+      "main": [
+        [
+          {
+            "node": "DB – Write Exam to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond – Exams",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB – Write Exam to Supabase": {
+      "main": [
+        [
+          {
+            "node": "CODE – Exam Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CODE – Exam Result": {
+      "main": [
+        [
+          {
+            "node": "Respond – Exams",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF – Has Recipients": {
+      "main": [
+        [
+          {
+            "node": "DB – Insert Notifications into Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CODE – Notifications Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB – Insert Notifications into Supabase": {
+      "main": [
+        [
+          {
+            "node": "CODE – Notifications Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CODE – Notifications Result": {
+      "main": [
+        [
+          {
+            "node": "Respond – Notifications",
             "type": "main",
             "index": 0
           }

@@ -327,6 +327,7 @@ export interface CourseMaterial {
   uploaded_by?: string;
   created_at: string;
   group_id?: string;
+  grade_level?: string;
   download_count?: number;
   rag_status?: 'pending' | 'processing' | 'completed' | 'failed';
   rag_error?: string;
@@ -381,6 +382,7 @@ export interface Flashcard {
 
 export interface GeneratedLessonData {
   title: string;
+  subject?: string;
   grade: string;
   difficulty: string;
   summary: string;

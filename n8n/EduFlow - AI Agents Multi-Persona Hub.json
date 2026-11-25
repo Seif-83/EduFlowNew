@@ -2427,17 +2427,6 @@
         ]
       ]
     },
-    "WEBHOOK | Agent Chat": {
-      "main": [
-        [
-          {
-            "node": "ASSISTANT: CODE | Parse Request1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "TEACHER: AUTH | Verify User (WF-03)": {
       "main": [
         [
