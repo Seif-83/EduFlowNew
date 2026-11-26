@@ -8,6 +8,10 @@
  * 5. EduFlow - Material Processing & RAG Hub (/webhook/eduflow-material-processing & /webhook/eduflow-rag-search)
  * 6. EduFlow - Exams & Assessment Hub (/webhook/eduflow-exams)
  * 7. EduFlow - Notifications & Scheduled Reports (/webhook/eduflow-notifications)
+ * 8. EduFlow - Notification Management (WF-27): sub-workflow, no webhook; called by WF-28/WF-29
+ * 9. EduFlow - Scheduled Reminders (WF-28): daily 08:00 Cairo, homework/session reminders
+ * 10. EduFlow - Weekly Parent Reports (WF-29): Thursday 18:00 Cairo, AI report to parents
+ *    (8-10 write rows into Supabase `notifications`; the app shows them after hydration)
  */
 
 export interface N8nWebhookResponse {
@@ -236,6 +240,27 @@ export async function callExamsWorkflow(
   payload: Record<string, any>
 ): Promise<N8nWebhookResponse> {
   return postToN8n('eduflow-exams', {
+    action,
+    ...payload,
+  });
+}
+
+/**
+ * 11. Call Payments & Earnings Hub (record, waive, invoices, teacher earnings)
+ */
+export async function callPaymentsWorkflow(
+  action:
+    | 'payment.record'
+    | 'payment.waive'
+    | 'invoice.create'
+    | 'invoices.generate_group'
+    | 'earning.generate_session'
+    | 'earning.approve'
+    | 'earning.pay'
+    | 'payments.refresh_overdue',
+  payload: Record<string, any>
+): Promise<N8nWebhookResponse> {
+  return postToN8n('eduflow-payments', {
     action,
     ...payload,
   });

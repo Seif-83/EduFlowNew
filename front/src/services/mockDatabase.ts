@@ -26,7 +26,7 @@ import {
   AutomationLog,
   StudentFollowUpRecord,
 } from '../types/database';
-import { sendN8nEvent, callStudentWorkflow, callAuditWorkflow, callNotificationsWorkflow, callMaterialIngestWorkflow } from './n8nService';
+import { sendN8nEvent, callStudentWorkflow, callAuditWorkflow, callNotificationsWorkflow, callMaterialIngestWorkflow, callExamsWorkflow, callPaymentsWorkflow } from './n8nService';
 import { supabase, supabaseAdmin, createUserInSupabase, createStudentInSupabase, resetSupabaseTestStudents, deleteAuthUserInSupabase } from './supabaseClient';
 import { diffAndPush, snapshotOnly, pullAll, fromDb, newUuid, isUuid } from './supabaseSync';
 
@@ -1072,19 +1072,39 @@ class MockDatabaseService {
     return newExam;
   }
 
-  submitExamAttempt(data: {
+  // Register the attempt start on the server (n8n Exams Hub). Returns the
+  // server attempt_id, or null when n8n is unreachable (local demo data etc).
+  async startExamAttemptOnServer(examId: string, studentId: string): Promise<string | null> {
+    try {
+      const res = await callExamsWorkflow('exam.start_attempt', {
+        exam_id: examId,
+        student_id: studentId,
+      });
+      if (res.success && res.data && res.data.success && res.data.attempt_id) {
+        return res.data.attempt_id as string;
+      }
+    } catch {
+      // n8n offline — the submit will create the attempt row instead.
+    }
+    return null;
+  }
+
+  async submitExamAttempt(data: {
     exam_id: string;
     student_id: string;
     student_name: string;
     parent_email: string;
     parent_name?: string;
     answers: Record<string, string>; // questionId -> selected choice string
-  }): {
+    attempt_id?: string | null; // server attempt from startExamAttemptOnServer
+    started_at?: string;
+  }): Promise<{
     score: number;
     total: number;
     pct: number;
     passed: boolean;
     attempt: ExamAttempt;
+    graded_on_server: boolean;
     review: {
       question: string;
       studentChoice: string;
@@ -1092,11 +1112,32 @@ class MockDatabaseService {
       isCorrect: boolean;
       explanation: string;
     }[];
-  } {
+  }> {
     const exam = this.state.exams.find((e) => e.id === data.exam_id);
-    const questions = exam?.questions || [];
+
+    // 1) Server-first: the n8n Exams Hub grades against the questions stored in
+    //    Supabase and writes the attempt row itself.
+    let serverRes: any = null;
+    try {
+      const res = await callExamsWorkflow('exam.submit_attempt', {
+        exam_id: data.exam_id,
+        student_id: data.student_id,
+        attempt_id: data.attempt_id || undefined,
+        started_at: data.started_at,
+        answers: data.answers,
+      });
+      if (res.success && res.data && res.data.success && res.data.mode === 'server_graded') {
+        serverRes = res.data;
+      }
+    } catch {
+      // fall through to local grading
+    }
+
     let score = 0;
-    const review: {
+    let total = 1;
+    let pct = 0;
+    let passed = false;
+    let review: {
       question: string;
       studentChoice: string;
       correctChoice: string;
@@ -1104,39 +1145,55 @@ class MockDatabaseService {
       explanation: string;
     }[] = [];
 
-    questions.forEach((q) => {
-      const studentAns = data.answers[q.id] || '';
-      const isCorrect = studentAns.trim() === q.correct_answer.trim();
-      if (isCorrect) {
-        score += q.points;
-      }
-      review.push({
-        question: q.question_text,
-        studentChoice: studentAns || 'لم يتم الحل',
-        correctChoice: q.correct_answer,
-        isCorrect,
-        explanation: q.explanation || 'الإجابة النموذجية تعتمد على المفاهيم العلمية المقررة.',
+    if (serverRes) {
+      score = serverRes.score;
+      total = serverRes.total;
+      pct = serverRes.pct;
+      passed = serverRes.passed;
+      review = serverRes.review || [];
+    } else {
+      // 2) Fallback: local grading (n8n offline or legacy non-UUID demo data).
+      const questions = exam?.questions || [];
+      questions.forEach((q) => {
+        const studentAns = data.answers[q.id] || '';
+        const isCorrect = studentAns.trim() === q.correct_answer.trim();
+        if (isCorrect) {
+          score += q.points;
+        }
+        review.push({
+          question: q.question_text,
+          studentChoice: studentAns || 'لم يتم الحل',
+          correctChoice: q.correct_answer,
+          isCorrect,
+          explanation: q.explanation || 'الإجابة النموذجية تعتمد على المفاهيم العلمية المقررة.',
+        });
       });
-    });
-
-    const total = questions.reduce((sum, q) => sum + q.points, 0) || 1;
-    const pct = Math.round((score / total) * 100);
-    const passed = pct >= (exam?.passing_score || 70);
+      total = questions.reduce((sum, q) => sum + q.points, 0) || 1;
+      pct = Math.round((score / total) * 100);
+      passed = pct >= (exam?.passing_score || 70);
+    }
 
     const attempt: ExamAttempt = {
-      id: newUuid(),
+      id: (serverRes && serverRes.attempt_id) || newUuid(),
       exam_id: data.exam_id,
       student_id: data.student_id,
       score,
       total_score: total,
       passed,
-      started_at: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
+      started_at: data.started_at || new Date(Date.now() - 1000 * 60 * 10).toISOString(),
       submitted_at: new Date().toISOString(),
       exam_title: exam?.title || 'اختبار',
       subject: exam?.subject || 'مادة علمية',
     };
 
-    this.state.examAttempts.unshift(attempt);
+    // When the server graded, the attempt row already exists in Supabase with
+    // this id; keep local state in sync without duplicating it remotely.
+    const existingIdx = this.state.examAttempts.findIndex((a) => a.id === attempt.id);
+    if (existingIdx >= 0) {
+      this.state.examAttempts[existingIdx] = attempt;
+    } else {
+      this.state.examAttempts.unshift(attempt);
+    }
 
     // Create Notification for Student
     this.addNotification({
@@ -1156,19 +1213,9 @@ class MockDatabaseService {
       target_email: data.parent_email,
     });
 
-    // Real-time dispatch to local n8n instance
-    sendN8nEvent('exam_submitted', {
-      student_name: data.student_name,
-      student_id: data.student_id,
-      exam_title: exam?.title,
-      parent_email: data.parent_email,
-      parent_name: data.parent_name,
-      earnedScore: score,
-      totalScore: total,
-      percentage: pct,
-      passingPercentage: 65,
-      passed,
-    });
+    // NOTE: no exam_submitted dispatch here anymore — the n8n Exams Hub already
+    // persisted the graded attempt when graded_on_server is true, and calling
+    // the legacy event would write a duplicate attempt row.
 
     this.persist();
 
@@ -1178,6 +1225,7 @@ class MockDatabaseService {
       pct,
       passed,
       attempt,
+      graded_on_server: !!serverRes,
       review,
     };
   }
@@ -1322,6 +1370,86 @@ class MockDatabaseService {
     return [...this.state.studentPayments];
   }
 
+  /**
+   * Generate this month's invoices for every active enrollment that has none yet
+   * (for students registered before invoicing existed). Skips existing ones, so it is safe to press twice.
+   * New invoices are mirrored to Supabase (only rows whose student/group exist there as UUIDs).
+   */
+  async generateInvoicesForActiveEnrollments(opts?: { periodLabel?: string; dueDate?: string }): Promise<{ created: number; skipped: number; synced: number; failedSync: number; noGroup: number; periodLabel: string }> {
+    const now = new Date();
+    const months = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+    const periodLabel = opts?.periodLabel || `شهر ${months[now.getMonth()]} ${now.getFullYear()}`;
+    const cycleMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const due = new Date(now.getFullYear(), now.getMonth(), 28);
+    const dueDate = opts?.dueDate || `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`;
+
+    let created = 0;
+    let skipped = 0;
+    const toSync: StudentPayment[] = [];
+    for (const e of this.state.enrollments) {
+      if (e.status !== 'active') continue;
+      const student = this.state.profiles.find((p) => p.id === e.student_id && p.role === 'student');
+      if (!student) continue;
+      const exists = this.state.studentPayments.some(
+        (p) => p.student_id === e.student_id && p.group_id === e.group_id && p.period_label === periodLabel
+      );
+      if (exists) { skipped++; continue; }
+      const group = this.state.groups.find((g) => g.id === e.group_id);
+      const billing = this.state.billingSettings.find((b) => b.group_id === e.group_id);
+      const amount = billing ? Number(billing.amount) || 0 : 450;
+      const inv: StudentPayment = {
+        id: newUuid(),
+        student_id: e.student_id,
+        group_id: e.group_id,
+        amount,
+        currency: billing?.currency || 'EGP',
+        paid_amount: 0,
+        remaining_amount: amount,
+        amount_due: amount,
+        amount_paid: 0,
+        status: 'unpaid',
+        period_label: periodLabel,
+        cycle_month: cycleMonth,
+        due_date: dueDate,
+        created_at: new Date().toISOString(),
+        student_name: student.full_name,
+        group_name: group?.name,
+      };
+      this.state.studentPayments.push(inv);
+      toSync.push(inv);
+      created++;
+    }
+    if (created > 0) {
+      this.persist();
+      this.notify();
+    }
+
+    let synced = 0;
+    let failedSync = 0;
+    for (const inv of toSync) {
+      if (!(isUuid(inv.id) && isUuid(inv.student_id) && isUuid(inv.group_id))) { failedSync++; continue; }
+      try {
+        const res = await callPaymentsWorkflow('invoice.create', {
+          id: inv.id,
+          student_id: inv.student_id,
+          group_id: inv.group_id,
+          amount: inv.amount,
+          currency: inv.currency,
+          period_label: inv.period_label,
+          due_date: inv.due_date,
+        });
+        if (res.success && res.data && res.data.success) synced++;
+        else failedSync++;
+      } catch {
+        failedSync++;
+      }
+    }
+    const noGroup = this.state.profiles.filter(
+      (pr) => pr.role === 'student' && !this.state.enrollments.some((e) => e.student_id === pr.id && e.status === 'active')
+    ).length;
+    return { created, skipped, synced, failedSync, noGroup, periodLabel };
+  }
+
   getPaymentTransactions(paymentId?: string): PaymentTransaction[] {
     if (paymentId) {
       return this.state.paymentTransactions.filter((pt) => pt.student_payment_id === paymentId);
@@ -1329,7 +1457,7 @@ class MockDatabaseService {
     return [...this.state.paymentTransactions];
   }
 
-  recordStudentPayment(paymentId: string, amount: number, method: 'cash' | 'instapay' | 'vodafone_cash' | 'bank_transfer' | 'other', recordedBy: string, notes?: string): { success: boolean; message: string } {
+  async recordStudentPayment(paymentId: string, amount: number, method: 'cash' | 'instapay' | 'vodafone_cash' | 'bank_transfer' | 'other', recordedBy: string, notes?: string): Promise<{ success: boolean; message: string; on_server?: boolean }> {
     const payment = this.state.studentPayments.find((p) => p.id === paymentId);
     if (!payment) return { success: false, message: 'الفاتورة غير موجودة' };
     if (payment.status === 'waived') return { success: false, message: 'لا يمكن تحصيل فاتورة معفاة' };
@@ -1341,23 +1469,44 @@ class MockDatabaseService {
       return { success: false, message: `المبلغ المدخل (${amount}) يتجاوز المتبقي (${remaining})` };
     }
 
-    const newPaid = currentPaid + amount;
+    // 1) Server-first: the n8n Payments Hub validates and writes the transaction
+    //    in Supabase (same rules as the record_student_payment DB function).
+    let serverRes: any = null;
+    let serverRejected: string | null = null;
+    try {
+      const res = await callPaymentsWorkflow('payment.record', {
+        payment_id: paymentId,
+        amount,
+        payment_method: method,
+        recorded_by: isUuid(recordedBy) ? recordedBy : undefined,
+        notes,
+      });
+      if (res.success && res.data) {
+        if (res.data.success) serverRes = res.data;
+        else serverRejected = res.data.error || 'رفض السيرفر العملية';
+      }
+    } catch {
+      // n8n offline — fall back to local recording below.
+    }
+    if (serverRejected) return { success: false, message: serverRejected };
+
+    const newPaid = serverRes ? Number(serverRes.paid_amount) : currentPaid + amount;
+    const newStatus = (serverRes ? serverRes.status : newPaid >= payment.amount ? 'paid' : 'partially_paid') as StudentPayment['status'];
     payment.paid_amount = newPaid;
-    payment.remaining_amount = payment.amount - newPaid;
+    payment.amount_paid = newPaid;
+    payment.remaining_amount = Math.max(0, payment.amount - newPaid);
     payment.payment_method = method;
     payment.recorded_by = recordedBy;
     payment.notes = notes || payment.notes;
-
-    if (newPaid >= payment.amount) {
-      payment.status = 'paid';
+    payment.status = newStatus;
+    if (newStatus === 'paid') {
       payment.paid_at = new Date().toISOString();
-    } else {
-      payment.status = 'partially_paid';
     }
 
-    // Add transaction record
+    // Add transaction record (server-written rows reuse the server id so the
+    // sync layer upserts the same row instead of duplicating it)
     this.state.paymentTransactions.push({
-      id: newUuid(),
+      id: (serverRes && serverRes.transaction_id) || newUuid(),
       student_payment_id: paymentId,
       amount,
       payment_method: method,
@@ -1376,13 +1525,35 @@ class MockDatabaseService {
     });
 
     this.persist();
-    return { success: true, message: 'تم تسجيل السداد بنجاح' };
+    return {
+      success: true,
+      message: serverRes ? 'تم تسجيل السداد على السيرفر ☁️' : 'تم تسجيل السداد محلياً 💻 (السيرفر غير متاح)',
+      on_server: !!serverRes,
+    };
   }
 
-  waiveStudentPayment(paymentId: string, reason: string, waivedBy: string): { success: boolean; message: string } {
+  async waiveStudentPayment(paymentId: string, reason: string, waivedBy: string): Promise<{ success: boolean; message: string; on_server?: boolean }> {
     const payment = this.state.studentPayments.find((p) => p.id === paymentId);
     if (!payment) return { success: false, message: 'الفاتورة غير موجودة' };
     if (!reason || reason.trim().length === 0) return { success: false, message: 'سبب الإعفاء مطلوب إلزامياً' };
+
+    // Server-first waive (mirrors the admin_waive_student_payment DB function)
+    let serverDone = false;
+    let serverRejected: string | null = null;
+    try {
+      const res = await callPaymentsWorkflow('payment.waive', {
+        payment_id: paymentId,
+        reason: reason.trim(),
+        waived_by: isUuid(waivedBy) ? waivedBy : undefined,
+      });
+      if (res.success && res.data) {
+        if (res.data.success) serverDone = true;
+        else serverRejected = res.data.error || 'رفض السيرفر العملية';
+      }
+    } catch {
+      // n8n offline — fall back to local waiver below.
+    }
+    if (serverRejected) return { success: false, message: serverRejected };
 
     payment.status = 'waived';
     payment.waived_reason = reason.trim();
@@ -1390,7 +1561,11 @@ class MockDatabaseService {
     payment.waived_by = waivedBy;
 
     this.persist();
-    return { success: true, message: 'تم إعفاء الفاتورة بنجاح' };
+    return {
+      success: true,
+      message: serverDone ? 'تم إعفاء الفاتورة على السيرفر ☁️' : 'تم إعفاء الفاتورة محلياً 💻 (السيرفر غير متاح)',
+      on_server: serverDone,
+    };
   }
 
   // Teacher Earnings
@@ -1401,7 +1576,15 @@ class MockDatabaseService {
     return [...this.state.teacherEarnings];
   }
 
-  approveTeacherEarning(earningId: string) {
+  async approveTeacherEarning(earningId: string): Promise<void> {
+    let serverRejected = false;
+    try {
+      const res = await callPaymentsWorkflow('earning.approve', { earning_id: earningId });
+      if (res.success && res.data && res.data.success === false) serverRejected = true;
+    } catch {
+      // n8n offline — local fallback below.
+    }
+    if (serverRejected) return;
     const e = this.state.teacherEarnings.find((te) => te.id === earningId);
     if (e && e.status === 'pending') {
       e.status = 'approved';
@@ -1409,7 +1592,15 @@ class MockDatabaseService {
     }
   }
 
-  payTeacherEarning(earningId: string) {
+  async payTeacherEarning(earningId: string): Promise<void> {
+    let serverRejected = false;
+    try {
+      const res = await callPaymentsWorkflow('earning.pay', { earning_id: earningId });
+      if (res.success && res.data && res.data.success === false) serverRejected = true;
+    } catch {
+      // n8n offline — local fallback below.
+    }
+    if (serverRejected) return;
     const e = this.state.teacherEarnings.find((te) => te.id === earningId);
     if (e && (e.status === 'approved' || e.status === 'pending')) {
       e.status = 'paid';
@@ -1985,7 +2176,7 @@ class MockDatabaseService {
       });
 
       // Create initial billing invoice
-      this.state.studentPayments.push({
+      const initialInvoice: StudentPayment = {
         id: newUuid(),
         student_id: newStudent.id,
         group_id: data.group_id,
@@ -2002,7 +2193,21 @@ class MockDatabaseService {
         created_at: new Date().toISOString(),
         student_name: newStudent.full_name,
         group_name: group?.name,
-      });
+      };
+      this.state.studentPayments.push(initialInvoice);
+
+      // Mirror the invoice to the server so payments can be recorded on it remotely
+      if (isUuid(initialInvoice.id) && isUuid(initialInvoice.student_id) && isUuid(initialInvoice.group_id)) {
+        callPaymentsWorkflow('invoice.create', {
+          id: initialInvoice.id,
+          student_id: initialInvoice.student_id,
+          group_id: initialInvoice.group_id,
+          amount: initialInvoice.amount,
+          currency: initialInvoice.currency,
+          period_label: initialInvoice.period_label,
+          due_date: initialInvoice.due_date,
+        }).catch(() => {});
+      }
     }
 
     // Add welcoming notification
@@ -2154,40 +2359,86 @@ class MockDatabaseService {
     this.persist();
   }
 
-  recordPaymentVoucherByAssistant(data: {
+  async recordPaymentVoucherByAssistant(data: {
     student_payment_id: string;
     amount: number;
     payment_method: 'cash' | 'instapay' | 'vodafone_cash' | 'bank_transfer' | 'other';
     reference_number?: string;
     notes?: string;
     assistant_name?: string;
-  }): { success: boolean; invoice?: StudentPayment; transaction?: PaymentTransaction } {
+  }): Promise<{ success: boolean; message?: string; invoice?: StudentPayment; transaction?: PaymentTransaction }> {
     const invoice = this.state.studentPayments.find((p) => p.id === data.student_payment_id);
     if (!invoice) return { success: false };
 
-    const transaction: PaymentTransaction = {
-      id: newUuid(),
-      student_payment_id: invoice.id,
-      amount: data.amount,
-      payment_method: data.payment_method,
-      reference_number: data.reference_number || 'OP-' + Math.floor(100000 + Math.random() * 900000),
-      notes: (data.notes || '') + ` (رصد المنسق: ${data.assistant_name || 'أ. كريم نبيل'})`,
-      paid_at: new Date().toISOString(),
-      recorded_by: data.assistant_name || 'ast-1',
-      created_at: new Date().toISOString(),
-    };
+    const refNumber = data.reference_number || 'OP-' + Math.floor(100000 + Math.random() * 900000);
 
-    this.state.paymentTransactions.push(transaction);
-
-    invoice.paid_amount = (invoice.paid_amount || 0) + data.amount;
-    invoice.amount_paid = invoice.paid_amount;
-    const targetDue = invoice.amount || invoice.amount_due || 450;
-    if (invoice.paid_amount >= targetDue) {
-      invoice.status = 'paid';
-    } else if (invoice.paid_amount > 0) {
-      invoice.status = 'partially_paid';
+    // 1) Server-first: the n8n Payments Hub records the voucher in Supabase.
+    let serverRes: any = null;
+    let serverRejected: string | null = null;
+    try {
+      const res = await callPaymentsWorkflow('payment.record', {
+        payment_id: invoice.id,
+        amount: data.amount,
+        payment_method: data.payment_method,
+        reference_number: refNumber,
+        recorder_name: data.assistant_name,
+        notes: data.notes,
+      });
+      if (res.success && res.data) {
+        if (res.data.success) serverRes = res.data;
+        else serverRejected = res.data.error || 'رفض السيرفر العملية';
+      }
+    } catch {
+      // n8n offline — fall back to local voucher below.
     }
-    invoice.remaining_amount = Math.max(0, targetDue - invoice.paid_amount);
+    if (serverRejected) return { success: false, message: serverRejected };
+
+    let transaction: PaymentTransaction;
+    if (serverRes) {
+      transaction = {
+        id: serverRes.transaction_id || newUuid(),
+        student_payment_id: invoice.id,
+        amount: data.amount,
+        payment_method: data.payment_method,
+        reference_number: refNumber,
+        notes: (data.notes || '') + ` (رصد المنسق: ${data.assistant_name || 'أ. كريم نبيل'})`,
+        paid_at: new Date().toISOString(),
+        recorded_by: data.assistant_name || 'ast-1',
+        created_at: new Date().toISOString(),
+      };
+      this.state.paymentTransactions.push(transaction);
+
+      invoice.paid_amount = Number(serverRes.paid_amount);
+      invoice.amount_paid = invoice.paid_amount;
+      invoice.status = serverRes.status as StudentPayment['status'];
+      invoice.remaining_amount = Number(serverRes.remaining_amount);
+      if (serverRes.status === 'paid') invoice.paid_at = new Date().toISOString();
+    } else {
+      // 2) Fallback: local voucher (n8n offline)
+      transaction = {
+        id: newUuid(),
+        student_payment_id: invoice.id,
+        amount: data.amount,
+        payment_method: data.payment_method,
+        reference_number: refNumber,
+        notes: (data.notes || '') + ` (رصد المنسق: ${data.assistant_name || 'أ. كريم نبيل'})`,
+        paid_at: new Date().toISOString(),
+        recorded_by: data.assistant_name || 'ast-1',
+        created_at: new Date().toISOString(),
+      };
+
+      this.state.paymentTransactions.push(transaction);
+
+      invoice.paid_amount = (invoice.paid_amount || 0) + data.amount;
+      invoice.amount_paid = invoice.paid_amount;
+      const targetDue = invoice.amount || invoice.amount_due || 450;
+      if (invoice.paid_amount >= targetDue) {
+        invoice.status = 'paid';
+      } else if (invoice.paid_amount > 0) {
+        invoice.status = 'partially_paid';
+      }
+      invoice.remaining_amount = Math.max(0, targetDue - invoice.paid_amount);
+    }
 
     const student = this.state.profiles.find((p) => p.id === invoice.student_id);
 
@@ -2355,6 +2606,25 @@ class MockDatabaseService {
         });
       });
     }
+
+    // Mirror the exam + its questions (with correct answers) to the n8n Exams
+    // Hub so server-side grading can read them from Supabase. Fire-and-forget:
+    // when n8n is offline, supabaseSync has already pushed the same rows.
+    callExamsWorkflow('exam.create_draft', {
+      id: examId,
+      session_id: data.session_id,
+      title: newExam.title,
+      subject: newExam.subject,
+      grade_level: newExam.grade_level,
+      duration_minutes: newExam.duration_minutes,
+      passing_score: newExam.passing_score,
+      creator_role: data.creator_role,
+      creation_mode: data.creation_mode,
+      curriculum_type: newExam.curriculum_type,
+      material_url: data.material_url,
+      is_published: true,
+      questions: createdQuestions,
+    }).catch(() => {});
 
     this.persist();
     return newExam;

@@ -222,7 +222,7 @@
     },
     {
       "id": "code-exams-1795566068981",
-      "name": "CODE – Process Exam",
+      "name": "CODE – Exams Hub",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -230,7 +230,7 @@
         596
       ],
       "parameters": {
-        "jsCode": "// EduFlow Exams & Assessment Hub - real Supabase persistence\nconst raw = $input.first().json;\nconst b = (raw.body && typeof raw.body === 'object') ? raw.body : raw;\nconst action = String(b.action || 'exam.create_draft').trim();\nconst BASE = 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1';\nconst isUuid = (v) => typeof v === 'string' &&\n  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\n\nconst fail = (message) => [{ json: { valid: false, success: false, error: message } }];\nconst ok = (method, url, body, extra) => [{ json: {\n  valid: true, _method: method, _url: url, _body: JSON.stringify(body), ...(extra || {}) } }];\n\nif (action === 'exam.create_draft' || action === 'exam.create') {\n  if (!isUuid(b.session_id)) return fail('session_id (UUID) is required to create an exam.');\n  const body = {\n    session_id: b.session_id,\n    title: b.title || 'اختبار EduFlow',\n    passing_score: typeof b.passing_score === 'number' ? b.passing_score : 70,\n    duration_minutes: b.duration_minutes || 15,\n    is_published: !!b.is_published,\n  };\n  for (const k of ['subject','grade_level','deadline','creator_role','creation_mode','curriculum_type','material_url']) {\n    if (b[k] !== undefined && b[k] !== null) body[k] = b[k];\n  }\n  return ok('POST', BASE + '/exams', body, { action });\n}\n\nif (action === 'exam.publish') {\n  if (!isUuid(b.exam_id)) return fail('exam_id (UUID) is required to publish an exam.');\n  return ok('PATCH', BASE + '/exams?id=eq.' + b.exam_id, { is_published: true }, { action });\n}\n\nif (action === 'exam.start_attempt') {\n  if (!isUuid(b.exam_id) || !isUuid(b.student_id)) return fail('exam_id and student_id (UUID) are required.');\n  return ok('POST', BASE + '/exam_attempts', {\n    exam_id: b.exam_id, student_id: b.student_id, started_at: new Date().toISOString(),\n  }, { action });\n}\n\nif (action === 'exam.submit_attempt') {\n  if (!isUuid(b.exam_id) || !isUuid(b.student_id)) return fail('exam_id and student_id (UUID) are required.');\n  const score = typeof b.score === 'number' ? b.score : (parseFloat(b.score) || 0);\n  const total = typeof b.total_score === 'number' ? b.total_score : (parseFloat(b.total_score) || 0);\n  const pct = total > 0 ? (score / total) * 100 : 0;\n  const body = {\n    exam_id: b.exam_id,\n    student_id: b.student_id,\n    score,\n    started_at: b.started_at || new Date().toISOString(),\n    submitted_at: b.submitted_at || new Date().toISOString(),\n    passed: b.passed !== undefined ? !!b.passed : (total > 0 ? pct >= 70 : score >= 70),\n  };\n  if (total > 0) body.total_score = total;\n  return ok('POST', BASE + '/exam_attempts', body, { action });\n}\n\nreturn fail('Unsupported action: ' + action);"
+        "jsCode": "// EduFlow Exams & Assessment Hub - server-side start/submit/grading against Supabase.\n// Runs inside the n8n Code node \"CODE - Exams Hub\" (Run Once for All Items).\nconst raw = $input.first().json;\nconst b = (raw.body && typeof raw.body === 'object') ? raw.body : raw;\nconst action = String(b.action || '').trim();\n\nconst BASE = 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1';\nconst SERVICE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA';\n\nconst isUuid = (v) => typeof v === 'string' &&\n  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\n\nconst respond = (obj) => [{ json: obj }];\nconst fail = (message) => respond({ success: false, error: message });\n\n// Code node HTTP helper (this.helpers in new Code node, $helpers as fallback).\nconst helpersRef = (typeof this !== 'undefined' && this && this.helpers) ||\n  (typeof $helpers !== 'undefined' ? $helpers : null);\nif (!helpersRef || !helpersRef.httpRequest) {\n  return respond({ success: false, error: 'httpRequest helper is not available in this n8n Code node.' });\n}\n\nasync function dbRequest(method, path, body, prefer) {\n  const headers = {\n    apikey: SERVICE_KEY,\n    Authorization: 'Bearer ' + SERVICE_KEY,\n    'Content-Type': 'application/json',\n  };\n  if (prefer) headers.Prefer = prefer;\n  const opts = { method, url: BASE + path, headers, json: true };\n  if (body !== undefined && body !== null) opts.body = body;\n  try {\n    return { ok: true, data: await helpersRef.httpRequest(opts) };\n  } catch (err) {\n    const msg = (err && err.response && err.response.body && err.response.body.message)\n      || (err && err.message) || 'Supabase request failed';\n    return { ok: false, error: msg };\n  }\n}\n\nasync function getExam(examId) {\n  const r = await dbRequest('GET', '/exams?id=eq.' + examId +\n    '&select=id,session_id,title,passing_score,duration_minutes,is_published');\n  if (!r.ok) return { error: r.error };\n  const row = Array.isArray(r.data) ? r.data[0] : r.data;\n  if (!row) return { error: 'Exam not found' };\n  return { exam: row };\n}\n\nasync function getQuestions(examId, withAnswers) {\n  const cols = withAnswers\n    ? 'id,question_text,question_type,options,points,correct_answer,explanation'\n    : 'id,question_text,question_type,options,points';\n  const r = await dbRequest('GET', '/questions?exam_id=eq.' + examId +\n    '&select=' + cols + '&order=created_at.asc');\n  if (!r.ok) return { error: r.error };\n  return { questions: Array.isArray(r.data) ? r.data : [] };\n}\n\n// ---------------- exam.create_draft / exam.create ----------------\nif (action === 'exam.create_draft' || action === 'exam.create') {\n  if (!isUuid(b.session_id)) return fail('session_id (UUID) is required to create an exam.');\n  const examRow = {\n    session_id: b.session_id,\n    title: b.title || 'اختبار EduFlow',\n    passing_score: typeof b.passing_score === 'number' ? b.passing_score : 70,\n    duration_minutes: b.duration_minutes || 15,\n    is_published: b.is_published !== undefined ? !!b.is_published : true,\n  };\n  if (isUuid(b.id)) examRow.id = b.id;\n  for (const k of ['subject', 'grade_level', 'deadline', 'creator_role', 'creation_mode', 'curriculum_type', 'material_url']) {\n    if (b[k] !== undefined && b[k] !== null) examRow[k] = b[k];\n  }\n  const exRes = await dbRequest('POST', '/exams', examRow, 'resolution=merge-duplicates,return=representation');\n  if (!exRes.ok) return fail('Could not save exam: ' + exRes.error);\n  const examRowOut = Array.isArray(exRes.data) ? exRes.data[0] : exRes.data;\n  const examId = (examRowOut && examRowOut.id) || examRow.id;\n\n  let questionsSaved = 0;\n  if (Array.isArray(b.questions) && b.questions.length > 0 && examId) {\n    const qRows = b.questions\n      .filter((q) => q && q.question_text)\n      .map((q) => {\n        const row = {\n          exam_id: examId,\n          question_text: q.question_text,\n          question_type: q.question_type === 'true_false' ? 'true_false' : 'mcq',\n          options: Array.isArray(q.options) ? q.options : [],\n          correct_answer: q.correct_answer != null ? String(q.correct_answer) : '',\n          points: typeof q.points === 'number' ? q.points : 1,\n        };\n        if (isUuid(q.id)) row.id = q.id;\n        row.explanation = q.explanation || null;\n        return row;\n      });\n    if (qRows.length > 0) {\n      const qRes = await dbRequest('POST', '/questions', qRows, 'resolution=merge-duplicates,return=representation');\n      if (!qRes.ok) return fail('Exam saved but questions failed: ' + qRes.error);\n      questionsSaved = Array.isArray(qRes.data) ? qRes.data.length : qRows.length;\n    }\n  }\n  return respond({ success: true, action: 'exam.create_draft', exam_id: examId, questions_saved: questionsSaved });\n}\n\n// ---------------- exam.publish ----------------\nif (action === 'exam.publish') {\n  if (!isUuid(b.exam_id)) return fail('exam_id (UUID) is required to publish an exam.');\n  const r = await dbRequest('PATCH', '/exams?id=eq.' + b.exam_id, { is_published: true }, 'return=representation');\n  if (!r.ok) return fail('Could not publish exam: ' + r.error);\n  return respond({ success: true, action: 'exam.publish', exam_id: b.exam_id });\n}\n\n// ---------------- exam.start_attempt ----------------\nif (action === 'exam.start_attempt') {\n  if (!isUuid(b.exam_id) || !isUuid(b.student_id)) return fail('exam_id and student_id (UUID) are required.');\n  const g = await getExam(b.exam_id);\n  if (g.error) return fail(g.error);\n  if (g.exam.is_published !== true) return fail('Exam is not published');\n\n  const q = await getQuestions(b.exam_id, false);\n  if (q.error) return fail(q.error);\n  if (q.questions.length === 0) return fail('Exam has no questions');\n\n  const totalScore = q.questions.reduce((s, x) => s + (Number(x.points) || 0), 0);\n  const aRes = await dbRequest('POST', '/exam_attempts', {\n    exam_id: b.exam_id,\n    student_id: b.student_id,\n    started_at: new Date().toISOString(),\n    score: 0,\n    total_score: totalScore,\n    passed: false,\n  }, 'return=representation');\n  if (!aRes.ok) return fail('Could not start attempt: ' + aRes.error);\n  const attemptRow = Array.isArray(aRes.data) ? aRes.data[0] : aRes.data;\n\n  return respond({\n    success: true,\n    action: 'exam.start_attempt',\n    attempt_id: attemptRow && attemptRow.id,\n    exam: {\n      id: g.exam.id,\n      title: g.exam.title,\n      duration_minutes: g.exam.duration_minutes,\n      passing_score: g.exam.passing_score != null ? g.exam.passing_score : 70,\n      total_score: totalScore,\n    },\n    questions: q.questions,\n  });\n}\n\n// ---------------- exam.submit_attempt ----------------\nif (action === 'exam.submit_attempt') {\n  if (!isUuid(b.exam_id) || !isUuid(b.student_id)) return fail('exam_id and student_id (UUID) are required.');\n  const now = new Date().toISOString();\n\n  // Legacy mode: browser already computed the score (kept for backwards compatibility).\n  if (b.answers === undefined || b.answers === null) {\n    const score = typeof b.score === 'number' ? b.score : (parseFloat(b.score) || 0);\n    const total = typeof b.total_score === 'number' ? b.total_score : (parseFloat(b.total_score) || 0);\n    const pct = total > 0 ? (score / total) * 100 : 0;\n    const body = {\n      exam_id: b.exam_id,\n      student_id: b.student_id,\n      score,\n      started_at: b.started_at || now,\n      submitted_at: b.submitted_at || now,\n      passed: b.passed !== undefined ? !!b.passed : (total > 0 ? pct >= 70 : score >= 70),\n    };\n    if (total > 0) body.total_score = total;\n    const w = await dbRequest('POST', '/exam_attempts', body, 'return=representation');\n    if (!w.ok) return fail('Could not save attempt: ' + w.error);\n    const row = Array.isArray(w.data) ? w.data[0] : w.data;\n    return respond({ success: true, action: 'exam.submit_attempt', mode: 'legacy', attempt_id: row && row.id, score, total_score: total });\n  }\n\n  // Server-side grading mode.\n  const g = await getExam(b.exam_id);\n  if (g.error) return fail(g.error);\n  const passingScore = g.exam.passing_score != null ? Number(g.exam.passing_score) : 70;\n\n  const q = await getQuestions(b.exam_id, true);\n  if (q.error) return fail(q.error);\n  if (q.questions.length === 0) return fail('Exam has no questions');\n\n  const answers = (b.answers && typeof b.answers === 'object') ? b.answers : {};\n  let score = 0;\n  const review = [];\n  for (const qu of q.questions) {\n    const studentAns = answers[qu.id] != null ? String(answers[qu.id]) : '';\n    const correct = String(qu.correct_answer || '');\n    const isCorrect = studentAns.trim() === correct.trim();\n    const pts = Number(qu.points) || 0;\n    if (isCorrect) score += pts;\n    review.push({\n      question: qu.question_text,\n      studentChoice: studentAns || 'لم يتم الحل',\n      correctChoice: correct,\n      isCorrect,\n      explanation: qu.explanation || 'الإجابة النموذجية تعتمد على المفاهيم العلمية المقررة.',\n    });\n  }\n  const total = q.questions.reduce((s, x) => s + (Number(x.points) || 0), 0) || 1;\n  const pct = Math.round((score / total) * 100);\n  const passed = pct >= passingScore;\n\n  let attemptId = isUuid(b.attempt_id) ? b.attempt_id : null;\n  const writeBody = { score, total_score: total, passed, submitted_at: now };\n  let w;\n  if (attemptId) {\n    w = await dbRequest('PATCH', '/exam_attempts?id=eq.' + attemptId, writeBody, 'return=representation');\n    if (w.ok) {\n      const rows = Array.isArray(w.data) ? w.data : (w.data ? [w.data] : []);\n      if (rows.length === 0) attemptId = null; // attempt row did not exist; insert instead\n    }\n  }\n  if (!attemptId) {\n    w = await dbRequest('POST', '/exam_attempts', {\n      exam_id: b.exam_id,\n      student_id: b.student_id,\n      started_at: b.started_at || now,\n      ...writeBody,\n    }, 'return=representation');\n  }\n  if (!w.ok) return fail('Could not save attempt: ' + w.error);\n  const saved = Array.isArray(w.data) ? w.data[0] : w.data;\n\n  return respond({\n    success: true,\n    action: 'exam.submit_attempt',\n    mode: 'server_graded',\n    attempt_id: (saved && saved.id) || attemptId,\n    score,\n    total,\n    pct,\n    passed,\n    passing_score: passingScore,\n    exam_title: g.exam.title,\n    review,\n  });\n}\n\nreturn fail('Unsupported action: ' + action);\n"
       }
     },
     {
@@ -249,103 +249,6 @@
           "responseCode": 200
         }
       }
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 3
-          },
-          "conditions": [
-            {
-              "id": "9755cbdb-05d1-48a2-8229-de2d76f28648",
-              "leftValue": "={{ $json.valid === true }}",
-              "rightValue": "",
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "aa67d175-cdcf-4934-b5fd-6eddab92339c",
-      "name": "IF – Exam Request Valid",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        896,
-        596
-      ]
-    },
-    {
-      "parameters": {
-        "method": "={{ $json._method }}",
-        "url": "={{ $json._url }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "apikey",
-              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
-            },
-            {
-              "name": "Authorization",
-              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
-            },
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "Prefer",
-              "value": "return=representation"
-            }
-          ]
-        },
-        "sendBody": true,
-        "contentType": "raw",
-        "rawContentType": "application/json",
-        "body": "={{ $json._body }}",
-        "options": {
-          "response": {
-            "response": {
-              "responseFormat": "json"
-            }
-          },
-          "timeout": 30000
-        }
-      },
-      "id": "95971e74-4486-4953-82fd-1bd276a00405",
-      "name": "DB – Write Exam to Supabase",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        1120,
-        500
-      ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 1000
-    },
-    {
-      "parameters": {
-        "jsCode": "const inItems = $input.all();\nconst req = $('CODE – Process Exam').first().json;\nconst first = inItems[0] ? inItems[0].json : null;\nconst row = Array.isArray(first) ? first[0] : first;\nreturn [{ json: {\n  success: true,\n  workflow: 'EXAMS-HUB',\n  action: req.action,\n  persisted: true,\n  row: row || null,\n  processed_at: new Date().toISOString()\n} }];"
-      },
-      "id": "6b171888-f771-4784-84e2-f657405fb9b1",
-      "name": "CODE – Exam Result",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1344,
-        500
-      ]
     },
     {
       "parameters": {
@@ -445,6 +348,51 @@
         1180,
         340
       ]
+    },
+    {
+      "id": "webhook-payments-1795566068982",
+      "name": "Webhook – Payments",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        496,
+        836
+      ],
+      "parameters": {
+        "path": "eduflow-payments",
+        "httpMethod": "POST",
+        "responseMode": "responseNode"
+      }
+    },
+    {
+      "id": "code-payments-1795566068982",
+      "name": "CODE – Payments Hub",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        696,
+        836
+      ],
+      "parameters": {
+        "jsCode": "// EduFlow Payments & Earnings Hub - server-side payments, waivers, invoices and teacher earnings.\n// Runs inside the n8n Code node \"CODE - Payments Hub\" (Run Once for All Items).\n// Mirrors the Supabase functions record_student_payment / admin_waive_student_payment /\n// admin_generate_group_invoices / admin_generate_session_earning / admin_refresh_overdue_payments,\n// but works without a Supabase Auth session (the demo login is local), same as the Exams Hub.\nconst raw = $input.first().json;\nconst b = (raw.body && typeof raw.body === 'object') ? raw.body : raw;\nconst action = String(b.action || '').trim();\n\nconst BASE = 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1';\nconst SERVICE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA';\n\nconst isUuid = (v) => typeof v === 'string' &&\n  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);\n\nconst respond = (obj) => [{ json: obj }];\nconst fail = (message) => respond({ success: false, error: message });\n\nconst METHODS = ['cash', 'instapay', 'vodafone_cash', 'bank_transfer', 'other'];\n\n// Code node HTTP helper (this.helpers in new Code node, $helpers as fallback).\nconst helpersRef = (typeof this !== 'undefined' && this && this.helpers) ||\n  (typeof $helpers !== 'undefined' ? $helpers : null);\nif (!helpersRef || !helpersRef.httpRequest) {\n  return respond({ success: false, error: 'httpRequest helper is not available in this n8n Code node.' });\n}\n\nasync function dbRequest(method, path, body, prefer) {\n  const headers = {\n    apikey: SERVICE_KEY,\n    Authorization: 'Bearer ' + SERVICE_KEY,\n    'Content-Type': 'application/json',\n  };\n  if (prefer) headers.Prefer = prefer;\n  const opts = { method, url: BASE + path, headers, json: true };\n  if (body !== undefined && body !== null) opts.body = body;\n  try {\n    return { ok: true, data: await helpersRef.httpRequest(opts) };\n  } catch (err) {\n    const msg = (err && err.response && err.response.body && err.response.body.message)\n      || (err && err.message) || 'Supabase request failed';\n    return { ok: false, error: msg };\n  }\n}\n\nasync function getPayment(paymentId) {\n  const r = await dbRequest('GET', '/student_payments?id=eq.' + paymentId +\n    '&select=id,student_id,group_id,session_id,amount,currency,period_label,due_date,status,paid_amount');\n  if (!r.ok) return { error: r.error };\n  const row = Array.isArray(r.data) ? r.data[0] : r.data;\n  if (!row) return { error: 'الفاتورة غير موجودة على السيرفر' };\n  return { payment: row };\n}\n\nasync function sumTransactions(paymentId) {\n  const r = await dbRequest('GET', '/payment_transactions?student_payment_id=eq.' + paymentId + '&select=amount');\n  if (!r.ok) return { error: r.error };\n  const rows = Array.isArray(r.data) ? r.data : [];\n  return { paid: rows.reduce((s, t) => s + (Number(t.amount) || 0), 0) };\n}\n\n// recorded_by must reference a profiles row (or be NULL after setup4.sql).\n// The demo admin/assistant accounts are local-only (adm-1 / ast-1), so resolve\n// a real UUID when possible: a passed UUID, else the first staff profile in DB.\nasync function resolveRecorder(val) {\n  if (isUuid(val)) return val;\n  const r = await dbRequest('GET', '/profiles?role=in.(admin,assistant)&select=id&limit=1');\n  if (r.ok && Array.isArray(r.data) && r.data.length > 0 && isUuid(r.data[0].id)) return r.data[0].id;\n  return null;\n}\n\n// ---------------- payment.record (admin record + assistant voucher) ----------------\nif (action === 'payment.record') {\n  if (!isUuid(b.payment_id)) return fail('payment_id (UUID) is required.');\n  const amount = Number(b.amount);\n  if (!amount || amount <= 0) return fail('Payment amount must be greater than zero.');\n  if (!METHODS.includes(b.payment_method)) return fail('Invalid payment method.');\n\n  const g = await getPayment(b.payment_id);\n  if (g.error) return fail(g.error);\n  const p = g.payment;\n  if (p.status === 'waived') return fail('لا يمكن تحصيل فاتورة معفاة');\n  if (p.status === 'paid') return fail('الفاتورة مسددة بالكامل بالفعل');\n\n  const s = await sumTransactions(b.payment_id);\n  if (s.error) return fail(s.error);\n  const total = Number(p.amount) || 0;\n  const paidSoFar = s.paid;\n  const remainingBefore = total - paidSoFar;\n  if (remainingBefore <= 0) return fail('No remaining balance for this payment.');\n  if (amount > remainingBefore) {\n    return fail('Payment exceeds remaining balance: ' + remainingBefore);\n  }\n\n  const recorder = await resolveRecorder(b.recorded_by);\n  const ref = b.reference_number ? String(b.reference_number).trim() : '';\n  let notes = b.notes ? String(b.notes) : '';\n  if (b.recorder_name) notes = (notes ? notes + ' ' : '') + '(رصد: ' + String(b.recorder_name) + ')';\n\n  const txRow = {\n    student_payment_id: b.payment_id,\n    amount,\n    payment_method: b.payment_method,\n    paid_at: new Date().toISOString(),\n    notes: notes || null,\n  };\n  if (recorder) txRow.recorded_by = recorder;\n\n  // Try with the reference_number column first (exists after setup4.sql);\n  // on older schemas retry without it and keep the number inside notes.\n  let txRes;\n  if (ref) {\n    txRes = await dbRequest('POST', '/payment_transactions', { ...txRow, reference_number: ref }, 'return=representation');\n    if (!txRes.ok && /reference_number/i.test(txRes.error || '')) {\n      txRow.notes = ((notes ? notes + ' ' : '') + 'رقم الإيصال: ' + ref) || null;\n      txRes = await dbRequest('POST', '/payment_transactions', txRow, 'return=representation');\n    }\n  } else {\n    txRes = await dbRequest('POST', '/payment_transactions', txRow, 'return=representation');\n  }\n  if (!txRes.ok) {\n    if (/recorded_by/i.test(txRes.error || '') && !recorder) {\n      return fail('قاعدة البيانات ترفض عملية بدون مسجّل (recorded_by). نفّذ ملف setup4.sql في Supabase SQL Editor أولاً.');\n    }\n    return fail('Could not record transaction: ' + txRes.error);\n  }\n  const txOut = Array.isArray(txRes.data) ? txRes.data[0] : txRes.data;\n\n  const newPaid = paidSoFar + amount;\n  const newRemaining = total - newPaid;\n  const newStatus = newRemaining <= 0 ? 'paid' : 'partially_paid';\n\n  const updateRow = {\n    status: newStatus,\n    payment_method: b.payment_method,\n    paid_at: newStatus === 'paid' ? new Date().toISOString() : null,\n    paid_amount: newPaid,\n  };\n  if (recorder) updateRow.recorded_by = recorder;\n  let upRes = await dbRequest('PATCH', '/student_payments?id=eq.' + b.payment_id, updateRow, 'return=representation');\n  if (!upRes.ok && /paid_amount/i.test(upRes.error || '')) {\n    delete updateRow.paid_amount;\n    upRes = await dbRequest('PATCH', '/student_payments?id=eq.' + b.payment_id, updateRow, 'return=representation');\n  }\n  if (!upRes.ok) return fail('Transaction saved but invoice update failed: ' + upRes.error);\n\n  return respond({\n    success: true,\n    mode: 'server_recorded',\n    action: 'payment.record',\n    transaction_id: txOut && txOut.id,\n    reference_number: ref || null,\n    total_amount: total,\n    paid_amount: newPaid,\n    remaining_amount: Math.max(0, newRemaining),\n    status: newStatus,\n  });\n}\n\n// ---------------- payment.waive ----------------\nif (action === 'payment.waive') {\n  if (!isUuid(b.payment_id)) return fail('payment_id (UUID) is required.');\n  const reason = b.reason ? String(b.reason).trim() : '';\n  if (!reason) return fail('سبب الإعفاء مطلوب إلزامياً');\n\n  const g = await getPayment(b.payment_id);\n  if (g.error) return fail(g.error);\n  if (!['unpaid', 'overdue', 'partially_paid'].includes(g.payment.status)) {\n    return fail('لا يمكن إعفاء فاتورة بحالة ' + g.payment.status);\n  }\n\n  const waver = await resolveRecorder(b.waived_by);\n  const waiveRow = {\n    status: 'waived',\n    waived_reason: reason,\n    waived_at: new Date().toISOString(),\n  };\n  if (waver) waiveRow.waived_by = waver;\n  const r = await dbRequest('PATCH', '/student_payments?id=eq.' + b.payment_id, waiveRow, 'return=representation');\n  if (!r.ok) return fail('Could not waive payment: ' + r.error);\n  return respond({ success: true, action: 'payment.waive', payment_id: b.payment_id, status: 'waived' });\n}\n\n// ---------------- invoice.create (mirror of a locally created invoice) ----------------\nif (action === 'invoice.create') {\n  if (!isUuid(b.student_id) || !isUuid(b.group_id)) return fail('student_id and group_id (UUID) are required.');\n  const amount = Number(b.amount);\n  if (!(amount >= 0)) return fail('amount is required.');\n  const row = {\n    student_id: b.student_id,\n    group_id: b.group_id,\n    amount,\n    currency: b.currency || 'EGP',\n    status: 'unpaid',\n  };\n  if (isUuid(b.id)) row.id = b.id;\n  if (isUuid(b.session_id)) row.session_id = b.session_id;\n  if (b.period_label) row.period_label = String(b.period_label);\n  if (b.due_date) row.due_date = String(b.due_date);\n  const r = await dbRequest('POST', '/student_payments', row, 'resolution=merge-duplicates,return=representation');\n  if (!r.ok) return fail('Could not create invoice: ' + r.error);\n  const out = Array.isArray(r.data) ? r.data[0] : r.data;\n  return respond({ success: true, action: 'invoice.create', payment_id: out && out.id });\n}\n\n// ---------------- invoices.generate_group (monthly / per_session) ----------------\nif (action === 'invoices.generate_group') {\n  if (!isUuid(b.group_id)) return fail('group_id (UUID) is required.');\n  const bs = await dbRequest('GET', '/group_billing_settings?group_id=eq.' + b.group_id +\n    '&select=payment_type,amount,currency');\n  if (!bs.ok) return fail(bs.error);\n  const billing = Array.isArray(bs.data) ? bs.data[0] : bs.data;\n  if (!billing) return fail('Group billing settings not found.');\n\n  const en = await dbRequest('GET', '/enrollments?group_id=eq.' + b.group_id +\n    '&status=eq.active&select=student_id');\n  if (!en.ok) return fail(en.error);\n  const studentIds = (Array.isArray(en.data) ? en.data : []).map((e) => e.student_id).filter(isUuid);\n  if (studentIds.length === 0) return fail('No active students in this group.');\n\n  let sessionId = null;\n  let periodLabel = b.period_label ? String(b.period_label).trim() : '';\n  if (billing.payment_type === 'per_session') {\n    if (!isUuid(b.session_id)) return fail('A session ID is required for per-session billing.');\n    const sr = await dbRequest('GET', '/sessions?id=eq.' + b.session_id + '&select=id,group_id,session_number');\n    if (!sr.ok) return fail(sr.error);\n    const sess = Array.isArray(sr.data) ? sr.data[0] : sr.data;\n    if (!sess || sess.group_id !== b.group_id) return fail('Session does not belong to this group.');\n    sessionId = b.session_id;\n    periodLabel = 'Session ' + (sess.session_number != null ? sess.session_number : '');\n  } else {\n    if (!periodLabel) return fail('Period label is required.');\n  }\n\n  // Existing invoices for this group + period/session (dedupe + waived guard)\n  let existQuery = '/student_payments?group_id=eq.' + b.group_id + '&select=student_id,status';\n  if (sessionId) existQuery += '&session_id=eq.' + sessionId;\n  else existQuery += '&period_label=eq.' + encodeURIComponent(periodLabel);\n  const ex = await dbRequest('GET', existQuery);\n  if (!ex.ok) return fail(ex.error);\n  const existing = Array.isArray(ex.data) ? ex.data : [];\n  if (sessionId && existing.some((x) => x.status === 'waived')) {\n    return fail('A waived invoice already exists for this session.');\n  }\n  const already = new Set(existing.map((x) => x.student_id));\n\n  if (!b.due_date) return fail('due_date is required.');\n  const rows = studentIds\n    .filter((sid) => !already.has(sid))\n    .map((sid) => ({\n      student_id: sid,\n      group_id: b.group_id,\n      session_id: sessionId,\n      amount: Number(billing.amount) || 0,\n      currency: billing.currency || 'EGP',\n      period_label: periodLabel,\n      due_date: String(b.due_date),\n      status: 'unpaid',\n    }));\n  if (rows.length === 0) {\n    return respond({ success: true, action: 'invoices.generate_group', created_invoices: 0, payment_type: billing.payment_type, period_label: periodLabel });\n  }\n  const ins = await dbRequest('POST', '/student_payments', rows, 'return=representation');\n  if (!ins.ok) return fail('Could not generate invoices: ' + ins.error);\n  return respond({\n    success: true,\n    action: 'invoices.generate_group',\n    created_invoices: Array.isArray(ins.data) ? ins.data.length : rows.length,\n    payment_type: billing.payment_type,\n    period_label: periodLabel,\n    session_id: sessionId,\n  });\n}\n\n// ---------------- earning.generate_session ----------------\nif (action === 'earning.generate_session') {\n  if (!isUuid(b.session_id)) return fail('session_id (UUID) is required.');\n  const sr = await dbRequest('GET', '/sessions?id=eq.' + b.session_id + '&select=id,group_id,title');\n  if (!sr.ok) return fail(sr.error);\n  const sess = Array.isArray(sr.data) ? sr.data[0] : sr.data;\n  if (!sess) return fail('Session not found.');\n\n  const gr = await dbRequest('GET', '/course_groups?id=eq.' + sess.group_id + '&select=id,teacher_id,name');\n  if (!gr.ok) return fail(gr.error);\n  const grp = Array.isArray(gr.data) ? gr.data[0] : gr.data;\n  if (!grp) return fail('Group not found.');\n\n  const cr = await dbRequest('GET', '/teacher_compensation?group_id=eq.' + sess.group_id +\n    '&teacher_id=eq.' + grp.teacher_id + '&select=compensation_type,amount,currency');\n  if (!cr.ok) return fail(cr.error);\n  const comp = Array.isArray(cr.data) ? cr.data[0] : cr.data;\n  if (!comp) return fail('Teacher compensation settings not found.');\n  if (comp.compensation_type !== 'per_session') {\n    return fail('This function only processes per-session compensation.');\n  }\n\n  const dup = await dbRequest('GET', '/teacher_earnings?session_id=eq.' + b.session_id + '&select=id,status');\n  if (!dup.ok) return fail(dup.error);\n  if (Array.isArray(dup.data) && dup.data.length > 0) {\n    return respond({ success: true, action: 'earning.generate_session', created: false, earning_id: dup.data[0].id });\n  }\n\n  const ins = await dbRequest('POST', '/teacher_earnings', {\n    teacher_id: grp.teacher_id,\n    group_id: sess.group_id,\n    session_id: b.session_id,\n    amount: Number(comp.amount) || 0,\n    currency: comp.currency || 'EGP',\n    description: 'مستحقات حصة: ' + (sess.title || ''),\n    status: 'pending',\n  }, 'return=representation');\n  if (!ins.ok) return fail('Could not create earning: ' + ins.error);\n  const out = Array.isArray(ins.data) ? ins.data[0] : ins.data;\n  return respond({\n    success: true,\n    action: 'earning.generate_session',\n    created: true,\n    earning_id: out && out.id,\n    teacher_id: grp.teacher_id,\n    amount: Number(comp.amount) || 0,\n    currency: comp.currency || 'EGP',\n  });\n}\n\n// ---------------- earning.approve / earning.pay ----------------\nif (action === 'earning.approve' || action === 'earning.pay') {\n  if (!isUuid(b.earning_id)) return fail('earning_id (UUID) is required.');\n  if (action === 'earning.approve') {\n    const r = await dbRequest('PATCH', '/teacher_earnings?id=eq.' + b.earning_id + '&status=eq.pending',\n      { status: 'approved' }, 'return=representation');\n    if (!r.ok) return fail('Could not approve earning: ' + r.error);\n    if (!Array.isArray(r.data) || r.data.length === 0) return fail('المستحق غير موجود أو ليس معلقاً');\n    return respond({ success: true, action, earning_id: b.earning_id, status: 'approved' });\n  }\n  const r = await dbRequest('PATCH', '/teacher_earnings?id=eq.' + b.earning_id + '&status=in.(pending,approved)',\n    { status: 'paid', paid_at: new Date().toISOString() }, 'return=representation');\n  if (!r.ok) return fail('Could not pay earning: ' + r.error);\n  if (!Array.isArray(r.data) || r.data.length === 0) return fail('المستحق غير موجود أو تم صرفه بالفعل');\n  return respond({ success: true, action, earning_id: b.earning_id, status: 'paid' });\n}\n\n// ---------------- payments.refresh_overdue ----------------\nif (action === 'payments.refresh_overdue') {\n  const today = new Date().toISOString().slice(0, 10);\n  const r = await dbRequest('PATCH',\n    '/student_payments?status=in.(unpaid,partially_paid)&due_date=lt.' + today,\n    { status: 'overdue' }, 'return=representation');\n  if (!r.ok) return fail('Could not refresh overdue payments: ' + r.error);\n  const count = Array.isArray(r.data) ? r.data.length : 0;\n  return respond({ success: true, action: 'payments.refresh_overdue', updated: count });\n}\n\nreturn fail('Unknown action: ' + (action || '(none)') + '. Expected one of: payment.record, payment.waive, invoice.create, invoices.generate_group, earning.generate_session, earning.approve, earning.pay, payments.refresh_overdue.');\n"
+      }
+    },
+    {
+      "id": "respond-payments-1795566068982",
+      "name": "Respond – Payments",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        836
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
     }
   ],
   "pinData": {},
@@ -541,54 +489,14 @@
       "main": [
         [
           {
-            "node": "CODE – Process Exam",
+            "node": "CODE – Exams Hub",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "CODE – Process Exam": {
-      "main": [
-        [
-          {
-            "node": "IF – Exam Request Valid",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "IF – Exam Request Valid": {
-      "main": [
-        [
-          {
-            "node": "DB – Write Exam to Supabase",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Respond – Exams",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "DB – Write Exam to Supabase": {
-      "main": [
-        [
-          {
-            "node": "CODE – Exam Result",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "CODE – Exam Result": {
+    "CODE – Exams Hub": {
       "main": [
         [
           {
@@ -633,6 +541,28 @@
         [
           {
             "node": "Respond – Notifications",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook – Payments": {
+      "main": [
+        [
+          {
+            "node": "CODE – Payments Hub",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CODE – Payments Hub": {
+      "main": [
+        [
+          {
+            "node": "Respond – Payments",
             "type": "main",
             "index": 0
           }

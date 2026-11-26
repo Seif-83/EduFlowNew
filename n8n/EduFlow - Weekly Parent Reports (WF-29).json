@@ -1,0 +1,332 @@
+{
+  "name": "WF-29 | Weekly Parent Reports",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 18 * * 4"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "name": "SCHEDULE | Weekly Thursday 18:00 Cairo",
+      "id": "ec80f052-d6fc-4295-971d-6f25670f1e48",
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/parent_student_links?select=parent_id,student_id&status=eq.approved&limit=500",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "DB | Fetch Approved Parent Links",
+      "id": "4ac5653b-d880-46cd-9f2a-be59e5926cf0",
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nif (r.statusCode !== 200 || !Array.isArray(r.body)) {\n  return [];\n}\n\nconst since = new Date(Date.now() - 7 * 86400000).toISOString();\nconst week = new Date().toISOString().slice(0, 10);\n\nreturn r.body\n  .filter(l => l && l.parent_id && l.student_id)\n  .map(l => ({\n    json: {\n      parent_id: String(l.parent_id).trim(),\n      student_id: String(l.student_id).trim(),\n      since,\n      week\n    }\n  }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "CODE | List Children",
+      "id": "18e3d956-af44-465a-9c38-fcc05bb92481",
+      "position": [
+        448,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/rpc/student_summary_core",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_student_id: $json.student_id, p_since: $json.since }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "DB | Weekly Student Summary",
+      "id": "4a9b766a-0c2f-4746-b5b1-ba0decd94ef2",
+      "position": [
+        672,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const children = $('CODE | List Children').all().map(x => x.json);\nconst responses = $input.all().map(x => x.json);\nconst out = [];\n\nresponses.forEach((r, i) => {\n  const child = children[i];\n  if (!child || r.statusCode !== 200 || !r.body) return;\n\n  // Handle RPC returning either an object or a 1-element array\n  const s = Array.isArray(r.body) ? r.body[0] : r.body;\n  if (!s || typeof s !== 'object') return;\n\n  const hasAttendance = Array.isArray(s.attendance) && s.attendance.length > 0;\n  const hasExams = Array.isArray(s.exams) && s.exams.length > 0;\n  const hasHomework = Array.isArray(s.homework) && s.homework.length > 0;\n  if (!hasAttendance && !hasExams && !hasHomework) return;\n\n  const name = (s.student && s.student.full_name) ? String(s.student.full_name).trim() : 'ابنك';\n  const prompt =\n    'اكتب تقرير أسبوعي قصير (حد أقصى 120 كلمة) بالعربي المصري المبسط لولي أمر عن ابنه/ابنته ' +\n    name +\n    '، اعتمادًا فقط على البيانات التالية، من غير ما تخترع أي معلومة. اذكر الحضور والامتحانات والواجبات، ونقطة قوة واحدة ونقطة تحتاج تحسين. ' +\n    'ارجع JSON بالشكل {\"report\":\"النص\"} فقط.\\nالبيانات: ' +\n    JSON.stringify({\n      attendance: s.attendance || [],\n      exams: s.exams || [],\n      homework: s.homework || []\n    });\n\n  out.push({\n    json: {\n      parent_id: child.parent_id,\n      student_id: child.student_id,\n      week: child.week,\n      student_name: name,\n      prompt\n    }\n  });\n});\n\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "CODE | Build Report Prompts",
+      "id": "effece23-245c-4ddc-a49a-7707e7ec38bd",
+      "position": [
+        896,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googlePalmApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: $json.prompt }] }], generationConfig: { temperature: 0.4, responseMimeType: 'application/json' } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "AI | Write Report (Gemini)",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "id": "850f5e6d-6305-47e6-a50f-51d119c37d89",
+      "position": [
+        1120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const prompts = $('CODE | Build Report Prompts').all().map(x => x.json);\nconst aiItems = $input.all().map(x => x.json);\nconst out = [];\n\naiItems.forEach((r, i) => {\n  const b = prompts[i];\n  if (!b || r.statusCode !== 200 || !r.body) return;\n\n  let text =\n    r.body.candidates &&\n    r.body.candidates[0] &&\n    r.body.candidates[0].content &&\n    r.body.candidates[0].content.parts &&\n    r.body.candidates[0].content.parts[0] &&\n    r.body.candidates[0].content.parts[0].text;\n\n  if (!text || typeof text !== 'string') return;\n\n  text = text.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();\n  let report = '';\n  try {\n    const parsed = JSON.parse(text);\n    report = (parsed && parsed.report) ? String(parsed.report) : '';\n  } catch (e) {\n    report = text;\n  }\n\n  report = report.trim().slice(0, 1900);\n  if (!report) return;\n\n  out.push({\n    json: {\n      user_ids: [b.parent_id],\n      notification_type: 'weekly_report',\n      title: `التقرير الأسبوعي: ${b.student_name}`,\n      message: report,\n      related_url: `/children/${b.student_id}/weekly-report`,\n      dedupe_key: `weekly:${b.student_id}:${b.week}`\n    }\n  });\n});\n\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "CODE | Build Notification",
+      "id": "02d89c34-0f3b-4def-8ce5-35913ec279b5",
+      "position": [
+        1344,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "user_ids": "={{ $json.user_ids }}",
+            "notification_type": "={{ $json.notification_type }}",
+            "title": "={{ $json.title }}",
+            "message": "={{ $json.message }}",
+            "dedupe_key": "={{ $json.dedupe_key }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "user_ids",
+              "displayName": "user_ids",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "array",
+              "removed": false
+            },
+            {
+              "id": "notification_type",
+              "displayName": "notification_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "dedupe_key",
+              "displayName": "dedupe_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "name": "NOTIFY | Send Report (WF-27)",
+      "id": "03d50c26-65a2-4a8c-bc31-4e4d4ce07913",
+      "position": [
+        1568,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "SCHEDULE | Weekly Thursday 18:00 Cairo": {
+      "main": [
+        [
+          {
+            "node": "DB | Fetch Approved Parent Links",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB | Fetch Approved Parent Links": {
+      "main": [
+        [
+          {
+            "node": "CODE | List Children",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CODE | List Children": {
+      "main": [
+        [
+          {
+            "node": "DB | Weekly Student Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB | Weekly Student Summary": {
+      "main": [
+        [
+          {
+            "node": "CODE | Build Report Prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CODE | Build Report Prompts": {
+      "main": [
+        [
+          {
+            "node": "AI | Write Report (Gemini)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI | Write Report (Gemini)": {
+      "main": [
+        [
+          {
+            "node": "CODE | Build Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CODE | Build Notification": {
+      "main": [
+        [
+          {
+            "node": "NOTIFY | Send Report (WF-27)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "45fbf085-85a8-4413-83c3-dde8cae3a865",
+  "meta": {
+    "instanceId": "6b4f440b34d3d6c409a7bdb0727caddc6093de9ab809b20989a3f702e605d22f"
+  },
+  "nodeGroups": [],
+  "id": "IDEoKBHw0OEMZyir",
+  "tags": []
+}

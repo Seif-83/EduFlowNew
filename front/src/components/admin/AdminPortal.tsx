@@ -58,6 +58,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
   const [payMethod, setPayMethod] = useState<'cash' | 'instapay' | 'vodafone_cash' | 'bank_transfer' | 'other'>('instapay');
   const [payNotes, setPayNotes] = useState('');
   const [paySuccessMsg, setPaySuccessMsg] = useState('');
+  const [paySubmitting, setPaySubmitting] = useState(false);
+  const [genInvoicesBusy, setGenInvoicesBusy] = useState(false);
+  const [genInvoicesMsg, setGenInvoicesMsg] = useState('');
+  const [, forceInvoiceRefresh] = useState(0);
+  const [waiveSubmitting, setWaiveSubmitting] = useState(false);
+  const [earningActionId, setEarningActionId] = useState<string | null>(null);
 
   // Waive Modal / Form
   const [waivePaymentId, setWaivePaymentId] = useState('');
@@ -115,35 +121,45 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
   });
 
   // Handle Record Payment
-  const handleRecordPayment = (e: React.FormEvent) => {
+  const handleRecordPayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!recordPaymentId || payAmount <= 0) return;
+    if (!recordPaymentId || payAmount <= 0 || paySubmitting) return;
 
-    const res = db.recordStudentPayment(recordPaymentId, payAmount, payMethod, currentAdmin.id, payNotes);
-    if (res.success) {
-      setPaySuccessMsg(res.message);
-      setRecordPaymentId('');
-      setPayAmount(0);
-      setPayNotes('');
-      setTimeout(() => setPaySuccessMsg(''), 4000);
-    } else {
-      alert(res.message);
+    setPaySubmitting(true);
+    try {
+      const res = await db.recordStudentPayment(recordPaymentId, payAmount, payMethod, currentAdmin.id, payNotes);
+      if (res.success) {
+        setPaySuccessMsg(res.message);
+        setRecordPaymentId('');
+        setPayAmount(0);
+        setPayNotes('');
+        setTimeout(() => setPaySuccessMsg(''), 4000);
+      } else {
+        alert(res.message);
+      }
+    } finally {
+      setPaySubmitting(false);
     }
   };
 
   // Handle Waive Payment
-  const handleWaivePayment = (e: React.FormEvent) => {
+  const handleWaivePayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!waivePaymentId || !waiveReason.trim()) return;
+    if (!waivePaymentId || !waiveReason.trim() || waiveSubmitting) return;
 
-    const res = db.waiveStudentPayment(waivePaymentId, waiveReason, currentAdmin.id);
-    if (res.success) {
-      setWaiveSuccessMsg(res.message);
-      setWaivePaymentId('');
-      setWaiveReason('');
-      setTimeout(() => setWaiveSuccessMsg(''), 4000);
-    } else {
-      alert(res.message);
+    setWaiveSubmitting(true);
+    try {
+      const res = await db.waiveStudentPayment(waivePaymentId, waiveReason, currentAdmin.id);
+      if (res.success) {
+        setWaiveSuccessMsg(res.message);
+        setWaivePaymentId('');
+        setWaiveReason('');
+        setTimeout(() => setWaiveSuccessMsg(''), 4000);
+      } else {
+        alert(res.message);
+      }
+    } finally {
+      setWaiveSubmitting(false);
     }
   };
 
@@ -608,6 +624,34 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
                 سجل فواتير الطلاب مع إمكانية تحصيل المبالغ أو إعفاء الحالات الإنسانية
               </p>
 
+              <div className="flex flex-wrap items-center gap-3 mb-4">
+                <button
+                  type="button"
+                  disabled={genInvoicesBusy}
+                  onClick={async () => {
+                    setGenInvoicesBusy(true);
+                    setGenInvoicesMsg('');
+                    try {
+                      const r = await db.generateInvoicesForActiveEnrollments();
+                      forceInvoiceRefresh((n) => n + 1);
+                      const head =
+                        r.created === 0
+                          ? `لا توجد فواتير جديدة (${r.periodLabel}).`
+                          : `تم توليد ${r.created} فاتورة (${r.periodLabel}). ${r.synced > 0 ? `☁️ على السيرفر: ${r.synced}` : '💻 محلياً فقط'}${r.failedSync > 0 && r.synced === 0 ? ' (السيرفر غير متاح أو الطالب غير موجود عليه)' : ''}`;
+                      setGenInvoicesMsg(
+                        head + (r.noGroup > 0 ? ` ⚠️ ${r.noGroup} طالب غير مسجل في أي مجموعة فلن تُولَّد له فاتورة.` : '')
+                      );
+                    } finally {
+                      setGenInvoicesBusy(false);
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold disabled:opacity-60"
+                >
+                  {genInvoicesBusy ? '⏳ جاري التوليد...' : '🧾 توليد فواتير الشهر للطلاب الحاليين'}
+                </button>
+                {genInvoicesMsg && <span className="text-xs font-bold text-indigo-800">{genInvoicesMsg}</span>}
+              </div>
+
               {paySuccessMsg && (
                 <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl mb-4">
                   {paySuccessMsg}
@@ -770,9 +814,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
 
                 <button
                   type="submit"
-                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                  disabled={paySubmitting}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
                 >
-                  توثيق السداد
+                  {paySubmitting ? 'جاري التوثيق على السيرفر... ⏳' : 'توثيق السداد'}
                 </button>
               </form>
             </div>
@@ -820,9 +865,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
 
                 <button
                   type="submit"
-                  className="w-full py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                  disabled={waiveSubmitting}
+                  className="w-full py-2.5 bg-slate-800 hover:bg-slate-900 disabled:opacity-60 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
                 >
-                  اعتماد الإعفاء الرسمي
+                  {waiveSubmitting ? 'جاري اعتماد الإعفاء على السيرفر... ⏳' : 'اعتماد الإعفاء الرسمي'}
                 </button>
               </form>
             </div>
@@ -876,18 +922,28 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
                       <td className="py-4">
                         {e.status === 'pending' && (
                           <button
-                            onClick={() => db.approveTeacherEarning(e.id)}
-                            className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-xs"
+                            disabled={earningActionId === e.id}
+                            onClick={async () => {
+                              setEarningActionId(e.id);
+                              await db.approveTeacherEarning(e.id);
+                              setEarningActionId(null);
+                            }}
+                            className="px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-bold rounded-lg text-xs"
                           >
-                            اعتماد
+                            {earningActionId === e.id ? '⏳' : 'اعتماد'}
                           </button>
                         )}
                         {e.status === 'approved' && (
                           <button
-                            onClick={() => db.payTeacherEarning(e.id)}
-                            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs"
+                            disabled={earningActionId === e.id}
+                            onClick={async () => {
+                              setEarningActionId(e.id);
+                              await db.payTeacherEarning(e.id);
+                              setEarningActionId(null);
+                            }}
+                            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold rounded-lg text-xs"
                           >
-                            صرف وتحويل
+                            {earningActionId === e.id ? '⏳' : 'صرف وتحويل'}
                           </button>
                         )}
                       </td>

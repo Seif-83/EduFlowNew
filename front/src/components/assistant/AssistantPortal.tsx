@@ -168,6 +168,7 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
   const [payMethod, setPayMethod] = useState<'cash' | 'instapay' | 'vodafone_cash' | 'bank_transfer' | 'other'>('vodafone_cash');
   const [payRefNumber, setPayRefNumber] = useState('');
   const [payNotes, setPayNotes] = useState('');
+  const [paySubmitting, setPaySubmitting] = useState(false);
   const [paymentReceipt, setPaymentReceipt] = useState<{
     invoice: StudentPayment;
     amount: number;
@@ -340,31 +341,38 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
     setTimeout(() => setAttendanceSuccess(''), 5000);
   };
 
-  const handleRecordPayment = (e: React.FormEvent) => {
+  const handleRecordPayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeStudentInvoice || payAmount <= 0) return;
+    if (!activeStudentInvoice || payAmount <= 0 || paySubmitting) return;
 
-    const res = db.recordPaymentVoucherByAssistant({
-      student_payment_id: activeStudentInvoice.id,
-      amount: payAmount,
-      payment_method: payMethod,
-      reference_number: payRefNumber || `VF-${Math.floor(10000000 + Math.random() * 90000000)}`,
-      notes: payNotes,
-      assistant_name: currentAssistant.full_name,
-    });
-
-    if (res.success && res.invoice) {
-      setPaymentReceipt({
-        invoice: res.invoice,
+    setPaySubmitting(true);
+    try {
+      const res = await db.recordPaymentVoucherByAssistant({
+        student_payment_id: activeStudentInvoice.id,
         amount: payAmount,
-        method: payMethod,
-        refNumber: res.transaction?.reference_number || 'TX-N/A',
-        studentName: activeStudentProfile?.full_name || 'طالب',
+        payment_method: payMethod,
+        reference_number: payRefNumber || `VF-${Math.floor(10000000 + Math.random() * 90000000)}`,
+        notes: payNotes,
+        assistant_name: currentAssistant.full_name,
       });
-      setShowPaymentModal(false);
-      setPayAmount(0);
-      setPayRefNumber('');
-      setPayNotes('');
+
+      if (res.success && res.invoice) {
+        setPaymentReceipt({
+          invoice: res.invoice,
+          amount: payAmount,
+          method: payMethod,
+          refNumber: res.transaction?.reference_number || 'TX-N/A',
+          studentName: activeStudentProfile?.full_name || 'طالب',
+        });
+        setShowPaymentModal(false);
+        setPayAmount(0);
+        setPayRefNumber('');
+        setPayNotes('');
+      } else if (res.message) {
+        alert(res.message);
+      }
+    } finally {
+      setPaySubmitting(false);
     }
   };
 
@@ -2305,9 +2313,10 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
               <div className="pt-3 flex gap-2">
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold cursor-pointer transition-all"
+                  disabled={paySubmitting}
+                  className="flex-1 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white font-bold cursor-pointer transition-all"
                 >
-                  تأكيد السداد وإصدار سند القبض
+                  {paySubmitting ? 'جاري التسجيل على السيرفر... ⏳' : 'تأكيد السداد وإصدار سند القبض'}
                 </button>
                 <button
                   type="button"

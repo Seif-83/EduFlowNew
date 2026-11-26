@@ -1,0 +1,366 @@
+{
+  "name": "WF-28 | Scheduled Reminders",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "name": "SCHEDULE | Daily 08:00 Cairo",
+      "id": "2f57e858-f02f-43df-b39e-896b97019e4f",
+      "position": [
+        0,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/assignments?select=id,title,group_id,due_at&is_published=eq.true&due_at=gte.' + $now.toUTC().toISO() + '&due_at=lte.' + $now.plus({ hours: 24 }).toUTC().toISO() }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "DB | Homework Due In 24h",
+      "id": "e0890ab6-24de-4c7b-a54b-9ec134b3b9b1",
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nif (r.statusCode !== 200 || !Array.isArray(r.body)) {\n  return [];\n}\nreturn r.body\n  .filter(a => a && a.id && a.group_id)\n  .map(a => ({\n    json: {\n      group_id: a.group_id,\n      include_parents: true,\n      notification_type: 'homework_due',\n      title: 'تذكير بموعد واجب',\n      message: `الواجب \"${a.title || 'واجب'}\" موعد تسليمه خلال 24 ساعة.`,\n      related_url: `/assignments/${a.id}`,\n      dedupe_key: `hw_due:${a.id}`\n    }\n  }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "CODE | Build Homework Reminders",
+      "id": "58627102-a343-473e-ad04-0e9c01b0a6d0",
+      "position": [
+        448,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "group_id": "={{ $json.group_id }}",
+            "include_parents": "={{ $json.include_parents }}",
+            "notification_type": "={{ $json.notification_type }}",
+            "title": "={{ $json.title }}",
+            "message": "={{ $json.message }}",
+            "dedupe_key": "={{ $json.dedupe_key }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "group_id",
+              "displayName": "group_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "include_parents",
+              "displayName": "include_parents",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "notification_type",
+              "displayName": "notification_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "dedupe_key",
+              "displayName": "dedupe_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "name": "NOTIFY | Homework Reminders (WF-27)",
+      "id": "b3cafb26-a4e2-402a-8b08-66b0a4ce654a",
+      "position": [
+        672,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/sessions?select=id,title,group_id,scheduled_at&is_published=eq.true&scheduled_at=gte.' + $now.toUTC().toISO() + '&scheduled_at=lte.' + $now.plus({ hours: 24 }).toUTC().toISO() }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "DB | Sessions In 24h",
+      "id": "3a172e8e-43ad-4761-8a4f-550f747a97f1",
+      "position": [
+        224,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nif (r.statusCode !== 200 || !Array.isArray(r.body)) {\n  return [];\n}\nreturn r.body\n  .filter(s => s && s.id && s.group_id)\n  .map(s => ({\n    json: {\n      group_id: s.group_id,\n      include_parents: false,\n      notification_type: 'session_reminder',\n      title: 'تذكير بحصة',\n      message: `حصة \"${s.title || 'حصة'}\" ميعادها خلال 24 ساعة.`,\n      related_url: `/sessions/${s.id}`,\n      dedupe_key: `session_soon:${s.id}`\n    }\n  }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "CODE | Build Session Reminders",
+      "id": "03f07b57-cd89-4af7-987b-412ee0a029cd",
+      "position": [
+        448,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "group_id": "={{ $json.group_id }}",
+            "include_parents": "={{ $json.include_parents }}",
+            "notification_type": "={{ $json.notification_type }}",
+            "title": "={{ $json.title }}",
+            "message": "={{ $json.message }}",
+            "dedupe_key": "={{ $json.dedupe_key }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "group_id",
+              "displayName": "group_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "include_parents",
+              "displayName": "include_parents",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "notification_type",
+              "displayName": "notification_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "dedupe_key",
+              "displayName": "dedupe_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "name": "NOTIFY | Session Reminders (WF-27)",
+      "id": "c4b13eae-a3cf-4004-9ee9-601a572c4d84",
+      "position": [
+        672,
+        192
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "SCHEDULE | Daily 08:00 Cairo": {
+      "main": [
+        [
+          {
+            "node": "DB | Homework Due In 24h",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "DB | Sessions In 24h",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB | Homework Due In 24h": {
+      "main": [
+        [
+          {
+            "node": "CODE | Build Homework Reminders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CODE | Build Homework Reminders": {
+      "main": [
+        [
+          {
+            "node": "NOTIFY | Homework Reminders (WF-27)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB | Sessions In 24h": {
+      "main": [
+        [
+          {
+            "node": "CODE | Build Session Reminders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CODE | Build Session Reminders": {
+      "main": [
+        [
+          {
+            "node": "NOTIFY | Session Reminders (WF-27)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "0b1edb08-89f8-4ea8-b51f-493b3293184c",
+  "meta": {
+    "instanceId": "6b4f440b34d3d6c409a7bdb0727caddc6093de9ab809b20989a3f702e605d22f"
+  },
+  "nodeGroups": [],
+  "id": "ZKyql48M29OCBkSR",
+  "tags": []
+}

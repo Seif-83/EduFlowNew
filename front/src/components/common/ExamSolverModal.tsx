@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import confetti from 'canvas-confetti';
 import { X, CheckCircle2, AlertCircle, ArrowRight, ArrowLeft, Trophy, Award, Clock } from 'lucide-react';
 import { Exam, Profile } from '../../types/database';
@@ -27,11 +28,15 @@ export const ExamSolverModal: React.FC<ExamSolverModalProps> = ({
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string>>({});
   const [timeRemaining, setTimeRemaining] = useState((exam.duration_minutes || 15) * 60);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [isGrading, setIsGrading] = useState(false);
+  const serverAttemptId = useRef<string | null>(null);
+  const examStartedAt = useRef<string>(new Date().toISOString());
   const [resultData, setResultData] = useState<{
     score: number;
     total: number;
     pct: number;
     passed: boolean;
+    graded_on_server: boolean;
     review: {
       question: string;
       studentChoice: string;
@@ -41,6 +46,15 @@ export const ExamSolverModal: React.FC<ExamSolverModalProps> = ({
     }[];
   } | null>(null);
 
+  // Register the attempt start on the server (n8n Exams Hub) so the submit
+  // updates the same row. Silent no-op when n8n is offline.
+  useEffect(() => {
+    db.startExamAttemptOnServer(exam.id, student.id).then((id) => {
+      serverAttemptId.current = id;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exam.id, student.id]);
+
   // Timer countdown
   useEffect(() => {
     if (isSubmitted) return;
@@ -48,7 +62,7 @@ export const ExamSolverModal: React.FC<ExamSolverModalProps> = ({
       setTimeRemaining((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
-          handleSubmit();
+          void handleSubmit();
           return 0;
         }
         return prev - 1;
@@ -74,44 +88,64 @@ export const ExamSolverModal: React.FC<ExamSolverModalProps> = ({
     }));
   };
 
-  const handleSubmit = () => {
-    if (!isSubmitted && answeredCount < questions.length) {
+  const handleSubmit = async () => {
+    if (isSubmitted || isGrading) return;
+    if (answeredCount < questions.length) {
       const confirmSubmit = window.confirm(
         `لقد أجبت على ${answeredCount} من ${questions.length} أسئلة فقط. هل تريد بالتأكيد تسليم الاختبار الآن؟`
       );
       if (!confirmSubmit) return;
     }
 
-    const res = db.submitExamAttempt({
-      exam_id: exam.id,
-      student_id: student.id,
-      student_name: student.full_name,
-      parent_email: student.parent_email || 'parent@eduflow.edu',
-      answers: selectedAnswers,
-    });
-
-    setResultData(res);
-    setIsSubmitted(true);
-
-    if (res.passed) {
-      sounds.playFanfare();
-      confetti({
-        particleCount: 90,
-        spread: 70,
-        origin: { y: 0.6 },
+    setIsGrading(true);
+    try {
+      const res = await db.submitExamAttempt({
+        exam_id: exam.id,
+        student_id: student.id,
+        student_name: student.full_name,
+        parent_email: student.parent_email || 'parent@eduflow.edu',
+        answers: selectedAnswers,
+        attempt_id: serverAttemptId.current,
+        started_at: examStartedAt.current,
       });
-    } else {
-      sounds.playWrong();
-    }
 
-    if (onCompleted) {
-      onCompleted();
+      setResultData(res);
+      setIsSubmitted(true);
+
+      if (res.passed) {
+        sounds.playFanfare();
+        confetti({
+          particleCount: 90,
+          spread: 70,
+          origin: { y: 0.6 },
+        });
+      } else {
+        sounds.playWrong();
+      }
+
+      if (onCompleted) {
+        onCompleted();
+      }
+    } finally {
+      setIsGrading(false);
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-200">
+  // Lock the page behind the modal; only the modal body scrolls
+  useEffect(() => {
+    const prevBody = document.body.style.overflow;
+    const prevHtml = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevBody;
+      document.documentElement.style.overflow = prevHtml;
+    };
+  }, []);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[1000] bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-hidden overscroll-contain">
+      <div className="bg-white rounded-3xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-3rem)] min-h-0 animate-in fade-in zoom-in-95 duration-200">
         {/* Top Accent Gradient */}
         <div className="h-1.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500" />
 
@@ -191,7 +225,7 @@ export const ExamSolverModal: React.FC<ExamSolverModalProps> = ({
         </div>
 
         {/* Modal Body Area */}
-        <div className="p-4 sm:p-6 overflow-y-auto flex-1">
+        <div className="p-4 sm:p-6 overflow-y-auto overscroll-contain flex-1 min-h-0">
           {!isSubmitted ? (
             <div className="bg-slate-50/60 border border-slate-200 rounded-2xl p-4 sm:p-6 shadow-sm">
               <div className="flex justify-between items-center mb-3">
@@ -288,7 +322,9 @@ export const ExamSolverModal: React.FC<ExamSolverModalProps> = ({
                   </span>
 
                   <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto mt-3 leading-relaxed">
-                    ✅ تم توثيق نتيجتك سحابياً في منظومة <strong>EduFlow</strong>، وإضافتها لسجل المعلم، وإرسال تقرير الأداء التفصيلي لولي أمرك ({student.parent_email || 'المعتمد'}) عبر محرك الأتمتة n8n.
+                    {resultData.graded_on_server
+                      ? <>✅ تم تصحيح إجاباتك على السيرفر (n8n + Supabase) وتوثيق نتيجتك في سجل المعلم، وإرسال تقرير الأداء التفصيلي لولي أمرك ({student.parent_email || 'المعتمد'}) عبر محرك الأتمتة n8n.</>
+                      : <>⚠️ تم التصحيح محلياً على الجهاز لأن السيرفر (n8n) غير متاح حالياً، وتم حفظ النتيجة ومزامنتها مع السحابة.</>}
                   </p>
                 </div>
 
@@ -314,8 +350,8 @@ export const ExamSolverModal: React.FC<ExamSolverModalProps> = ({
                     <div className="text-[11px] font-bold text-slate-500 mb-1">
                       حالة التوثيق
                     </div>
-                    <div className="text-xs font-black text-emerald-600 mt-1.5">
-                      معتمد سحابياً ☁️
+                    <div className={`text-xs font-black mt-1.5 ${resultData.graded_on_server ? 'text-emerald-600' : 'text-amber-600'}`}>
+                      {resultData.graded_on_server ? 'مصحح على السيرفر ☁️' : 'تصحيح محلي 💻'}
                     </div>
                   </div>
                 </div>
@@ -366,7 +402,7 @@ export const ExamSolverModal: React.FC<ExamSolverModalProps> = ({
               <button
                 type="button"
                 onClick={() => setCurrentIdx((prev) => Math.max(0, prev - 1))}
-                disabled={currentIdx === 0}
+                disabled={currentIdx === 0 || isGrading}
                 className="px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm border border-slate-300 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 transition-colors"
               >
                 <ArrowRight className="w-4 h-4" />
@@ -391,11 +427,12 @@ export const ExamSolverModal: React.FC<ExamSolverModalProps> = ({
 
                 <button
                   type="button"
-                  onClick={handleSubmit}
-                  className="px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md shadow-emerald-600/20 flex items-center gap-1.5 transition-all"
+                  onClick={() => void handleSubmit()}
+                  disabled={isGrading}
+                  className="px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md shadow-emerald-600/20 flex items-center gap-1.5 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>تسليم الاختبار 🚀</span>
+                  <span>{isGrading ? 'جاري التصحيح على السيرفر... ⏳' : 'تسليم الاختبار 🚀'}</span>
                 </button>
               </div>
             </>
@@ -412,6 +449,7 @@ export const ExamSolverModal: React.FC<ExamSolverModalProps> = ({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

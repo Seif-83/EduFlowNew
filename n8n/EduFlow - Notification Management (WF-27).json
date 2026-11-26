@@ -1,0 +1,486 @@
+{
+  "name": "WF-27 | Notification Management",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "name": "TRIGGER | Receive Notification Request",
+      "id": "b5b3104d-f380-4e6e-8a14-6db31c95ae71",
+      "position": [
+        736,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst i = $input.first().json;\n\nconst uuidRe =\n  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\n\nconst fail = (message) => [{\n  json: {\n    valid: false,\n    code: 'VALIDATION',\n    message,\n  },\n}];\n\nconst title = typeof i.title === 'string'\n  ? i.title.trim()\n  : '';\n\nconst message = typeof i.message === 'string'\n  ? i.message.trim()\n  : '';\n\nif (!title || title.length > 200) {\n  return fail('Title is required and must not exceed 200 characters.');\n}\n\nif (!message || message.length > 2000) {\n  return fail('Message is required and must not exceed 2000 characters.');\n}\n\nif (\n  i.user_ids !== undefined &&\n  !Array.isArray(i.user_ids)\n) {\n  return fail('user_ids must be an array.');\n}\n\nconst userIds = Array.isArray(i.user_ids)\n  ? [...new Set(i.user_ids.map(String))]\n  : [];\n\nif (!userIds.every(id => uuidRe.test(id))) {\n  return fail('Every user_id must be a valid UUID.');\n}\n\nconst groupId = i.group_id\n  ? String(i.group_id).trim()\n  : null;\n\nif (groupId && !uuidRe.test(groupId)) {\n  return fail('group_id must be a valid UUID.');\n}\n\nif (!userIds.length && !groupId) {\n  return fail('Provide at least one user_id or a group_id.');\n}\n\nif (\n  i.include_parents !== undefined &&\n  typeof i.include_parents !== 'boolean'\n) {\n  return fail('include_parents must be a boolean.');\n}\n\nconst type = typeof i.notification_type === 'string'\n  ? i.notification_type.trim()\n  : 'general';\n\nif (!type || type.length > 50) {\n  return fail('notification_type must be between 1 and 50 characters.');\n}\n\nlet relatedUrl = null;\n\nif (i.related_url) {\n  if (typeof i.related_url !== 'string') {\n    return fail('related_url must be a string.');\n  }\n\n  relatedUrl = i.related_url.trim();\n\n  if (relatedUrl.length > 2048) {\n    return fail('related_url is too long.');\n  }\n}\n\nconst dedupeKey = i.dedupe_key\n  ? String(i.dedupe_key).trim()\n  : `${type}:${relatedUrl || title}:${new Date().toISOString().slice(0, 10)}`;\n\nif (!dedupeKey || dedupeKey.length > 200) {\n  return fail('dedupe_key must be between 1 and 200 characters.');\n}\n\nreturn [{\n  json: {\n    valid: true,\n    user_ids: userIds,\n    group_id: groupId,\n    include_parents: i.include_parents === true,\n    notification_type: type,\n    title,\n    message,\n    related_url: relatedUrl,\n    dedupe_key: dedupeKey,\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "CODE | Validate & Plan",
+      "id": "1e4e4333-252c-4e71-a9cd-6df6cd4cbf9e",
+      "position": [
+        960,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d5d99db3-9a4e-458f-ac85-70beb0120f9b",
+              "leftValue": "={{ $json.valid === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "name": "IF | Request Valid",
+      "id": "9f02cc1a-8c94-4a5a-8e1d-c3d563ac2249",
+      "position": [
+        1184,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "e929a880-146d-4db6-b6b6-01f92e95a1b8",
+              "leftValue": "={{ !!$json.group_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "name": "IF | Has Group",
+      "id": "ecb52588-9dde-44e1-b6fc-f03e2311cffb",
+      "position": [
+        1408,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/enrollments?select=student_id&status=eq.active&group_id=eq.' + $('CODE | Validate & Plan').first().json.group_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "DB | Fetch Group Students",
+      "id": "6f2c0432-a76e-48f4-b16d-c92831aaa13a",
+      "position": [
+        1632,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const plan = $('CODE | Validate & Plan').first().json;\nconst r = $input.first().json;\nconst uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;\n\nconst rawStudents = (r.statusCode === 200 && Array.isArray(r.body))\n  ? r.body.map(x => x && x.student_id)\n  : [];\n\nconst students = [...new Set(\n  rawStudents\n    .filter(id => typeof id === 'string' && uuidRe.test(id.trim()))\n    .map(id => id.trim())\n)];\n\nreturn [{\n  json: {\n    student_ids: students,\n    need_parents: plan.include_parents === true && students.length > 0\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "CODE | Collect Students",
+      "id": "065b814f-497c-4fc0-8192-c7e3841c40d7",
+      "position": [
+        1856,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a9714e9d-1f01-47e4-8219-1570d5734403",
+              "leftValue": "={{ $json.need_parents === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "name": "IF | Need Parents",
+      "id": "cf9e4075-0bdd-4c1e-a3c9-462817f5975a",
+      "position": [
+        2080,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/parent_student_links?select=parent_id&status=eq.approved&student_id=in.(' + $json.student_ids.join(',') + ')' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "DB | Fetch Parents",
+      "id": "4c2cecc6-d466-4610-b3a2-f6a14d47ee94",
+      "position": [
+        2304,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const plan = $('CODE | Validate & Plan').first().json;\n\nlet students = [];\nlet parents = [];\nlet warnings = [];\n\ntry {\n  const collected = $('CODE | Collect Students').first().json;\n  if (Array.isArray(collected.student_ids)) {\n    students = collected.student_ids;\n  }\n} catch (e) {}\n\ntry {\n  const parentResp = $('DB | Fetch Parents').first().json;\n  if (parentResp && parentResp.statusCode === 200 && Array.isArray(parentResp.body)) {\n    parents = parentResp.body\n      .map(x => x && x.parent_id)\n      .filter(Boolean);\n  } else if (parentResp && parentResp.statusCode && parentResp.statusCode !== 200) {\n    warnings.push(`Parent lookup returned status ${parentResp.statusCode}`);\n  }\n} catch (e) {}\n\nconst merged = [...new Set([\n  ...(plan.user_ids || []),\n  ...students,\n  ...parents\n])];\n\nif (merged.length > 1000) {\n  warnings.push(`Recipient list truncated from ${merged.length} to 1000`);\n}\n\nconst finalUsers = merged.slice(0, 1000);\n\nconst rows = finalUsers.map(u => ({\n  user_id: u,\n  title: plan.title,\n  message: plan.message,\n  notification_type: plan.notification_type,\n  related_url: plan.related_url,\n  is_read: false,\n  dedupe_key: plan.dedupe_key\n}));\n\nreturn [{\n  json: {\n    has_rows: rows.length > 0,\n    rows,\n    warnings\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "CODE | Build Rows",
+      "id": "756a2dee-1833-4dd2-ac87-7e7288472746",
+      "position": [
+        2528,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "43f024a9-52ad-4311-9e14-c3b788562705",
+              "leftValue": "={{ $json.has_rows === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "name": "IF | Has Recipients",
+      "id": "5615d396-dd0f-4076-9d7f-43a1e25bf456",
+      "position": [
+        2752,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { success: true, code: 'OK', attempted: 0, created: 0, message: 'No recipients found' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "RESPONSE | No Recipients",
+      "id": "27d4be64-25de-4970-a298-61b324332466",
+      "position": [
+        2976,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/notifications?on_conflict=user_id,dedupe_key",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=ignore-duplicates,return=representation"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.rows) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "name": "DB | Insert Notifications",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "id": "f9448f96-89b2-4742-8ab3-b24bd4283149",
+      "position": [
+        2976,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json;\nconst attempted = $('CODE | Build Rows').first().json.rows.length;\nif (r.statusCode >= 200 && r.statusCode < 300) {\n  const created = Array.isArray(r.body) ? r.body.length : 0;\n  return [{ json: { success: true, code: 'OK', attempted, created, skipped_duplicates: attempted - created } }];\n}\nreturn [{ json: { success: false, code: 'UPSTREAM_ERROR', message: (r.body && r.body.message) || 'Insert failed. Make sure sql/004 was applied (notifications.dedupe_key).' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "RESPONSE | Notifications Created",
+      "id": "9d339583-d45c-42fb-a6cd-940d0942bbbe",
+      "position": [
+        3200,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nreturn [{ json: { success: false, authorized: false, code: j.code || 'FORBIDDEN', message: j.message || 'Request failed' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "RESPONSE | Fail",
+      "id": "854d7a9f-fdf7-436d-ab6e-3cd34b24ef80",
+      "position": [
+        1408,
+        672
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "TRIGGER | Receive Notification Request": {
+      "main": [
+        [
+          {
+            "node": "CODE | Validate & Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CODE | Validate & Plan": {
+      "main": [
+        [
+          {
+            "node": "IF | Request Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF | Request Valid": {
+      "main": [
+        [
+          {
+            "node": "IF | Has Group",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "RESPONSE | Fail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF | Has Group": {
+      "main": [
+        [
+          {
+            "node": "DB | Fetch Group Students",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CODE | Build Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB | Fetch Group Students": {
+      "main": [
+        [
+          {
+            "node": "CODE | Collect Students",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CODE | Collect Students": {
+      "main": [
+        [
+          {
+            "node": "IF | Need Parents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF | Need Parents": {
+      "main": [
+        [
+          {
+            "node": "DB | Fetch Parents",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CODE | Build Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB | Fetch Parents": {
+      "main": [
+        [
+          {
+            "node": "CODE | Build Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CODE | Build Rows": {
+      "main": [
+        [
+          {
+            "node": "IF | Has Recipients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF | Has Recipients": {
+      "main": [
+        [
+          {
+            "node": "DB | Insert Notifications",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "RESPONSE | No Recipients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB | Insert Notifications": {
+      "main": [
+        [
+          {
+            "node": "RESPONSE | Notifications Created",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "f422ddfb-08ec-4024-b4f2-1664069aab4b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "6b4f440b34d3d6c409a7bdb0727caddc6093de9ab809b20989a3f702e605d22f"
+  },
+  "nodeGroups": [],
+  "id": "fw0cwRKIQJVX9xNp",
+  "tags": []
+}
