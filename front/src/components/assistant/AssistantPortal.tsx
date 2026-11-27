@@ -4,7 +4,6 @@ import {
   Users,
   BookOpen,
   CalendarCheck,
-  CreditCard,
   LifeBuoy,
   Send,
   Plus,
@@ -36,11 +35,9 @@ import {
   CourseGroup,
   Session,
   CourseMaterial,
-  StudentPayment,
   Complaint,
   StudentFollowUpRecord,
   Exam,
-  PaymentTransaction,
 } from '../../types/database';
 import { db } from '../../services/mockDatabase';
 import {
@@ -50,6 +47,7 @@ import {
   AssignmentTrackerBadge,
 } from '../common/AnalyticsCharts';
 import { EduFlowLogo } from '../common/EduFlowLogo';
+import { ModalPortal } from '../common/ModalPortal';
 
 interface AssistantPortalProps {
   currentAssistant: Profile;
@@ -63,10 +61,12 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
     | 'materials'
     | 'exams'
     | 'attendance'
-    | 'payments'
     | 'complaints'
     | 'broadcast'
-  >(() => (localStorage.getItem('eduflow_assistant_tab') as any) || 'tracker');
+  >(() => {
+    const saved = localStorage.getItem('eduflow_assistant_tab');
+    return saved && saved !== 'payments' ? (saved as any) : 'tracker';
+  });
 
   React.useEffect(() => {
     localStorage.setItem('eduflow_assistant_tab', activeTab);
@@ -159,24 +159,6 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
   });
   const [attendanceSuccess, setAttendanceSuccess] = useState('');
 
-  // 6. Strict Privacy Student Payment Lookup & Collection State
-  const [selectedStudentLookupKey, setSelectedStudentLookupKey] = useState<string>(
-    followUpRecords[0]?.student_id || 'stu-1'
-  );
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [payAmount, setPayAmount] = useState<number>(0);
-  const [payMethod, setPayMethod] = useState<'cash' | 'instapay' | 'vodafone_cash' | 'bank_transfer' | 'other'>('vodafone_cash');
-  const [payRefNumber, setPayRefNumber] = useState('');
-  const [payNotes, setPayNotes] = useState('');
-  const [paySubmitting, setPaySubmitting] = useState(false);
-  const [paymentReceipt, setPaymentReceipt] = useState<{
-    invoice: StudentPayment;
-    amount: number;
-    method: string;
-    refNumber: string;
-    studentName: string;
-  } | null>(null);
-
   // 7. Complaint Resolution State
   const [selectedComplaintId, setSelectedComplaintId] = useState<string | null>(null);
   const [complaintReplyText, setComplaintReplyText] = useState('');
@@ -190,7 +172,6 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
 
   // Database queries
   const materials = db.getMaterials(selectedGroupId);
-  const allInvoices = db.getStudentPayments();
   const allComplaints = db.getComplaints();
   const allExams = db.getExams();
 
@@ -203,11 +184,6 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
   const videoRate = totalStudentsInGroup > 0 ? Math.round((watchedCount / totalStudentsInGroup) * 100) : 0;
   const examRate = totalStudentsInGroup > 0 ? Math.round((examTakenCount / totalStudentsInGroup) * 100) : 0;
   const homeworkRate = totalStudentsInGroup > 0 ? Math.round((homeworkDoneCount / totalStudentsInGroup) * 100) : 0;
-
-  // Selected student for private payment lookup
-  const activeStudentProfile = db.getProfileById(selectedStudentLookupKey) || enrolledStudents[0];
-  const activeStudentInvoice = allInvoices.find((i) => i.student_id === selectedStudentLookupKey);
-  const activeStudentTransactions = db.getPaymentTransactions(activeStudentInvoice?.id || '');
 
   // Handlers
   const handleCreateStudent = (e: React.FormEvent) => {
@@ -339,41 +315,6 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
     db.recordBatchAttendanceByAssistant(selectedSessionId, records);
     setAttendanceSuccess('تم حفظ سجل الحضور والغياب بنجاح، وإرسال تنبيهات الغياب الفورية لأولياء الأمور.');
     setTimeout(() => setAttendanceSuccess(''), 5000);
-  };
-
-  const handleRecordPayment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!activeStudentInvoice || payAmount <= 0 || paySubmitting) return;
-
-    setPaySubmitting(true);
-    try {
-      const res = await db.recordPaymentVoucherByAssistant({
-        student_payment_id: activeStudentInvoice.id,
-        amount: payAmount,
-        payment_method: payMethod,
-        reference_number: payRefNumber || `VF-${Math.floor(10000000 + Math.random() * 90000000)}`,
-        notes: payNotes,
-        assistant_name: currentAssistant.full_name,
-      });
-
-      if (res.success && res.invoice) {
-        setPaymentReceipt({
-          invoice: res.invoice,
-          amount: payAmount,
-          method: payMethod,
-          refNumber: res.transaction?.reference_number || 'TX-N/A',
-          studentName: activeStudentProfile?.full_name || 'طالب',
-        });
-        setShowPaymentModal(false);
-        setPayAmount(0);
-        setPayRefNumber('');
-        setPayNotes('');
-      } else if (res.message) {
-        alert(res.message);
-      }
-    } finally {
-      setPaySubmitting(false);
-    }
   };
 
   const handleSendParentFollowUp = () => {
@@ -555,18 +496,6 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
         >
           <CalendarCheck className="w-4 h-4 text-teal-600" />
           <span>رصد الحضور</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('payments')}
-          className={`flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-bold rounded-xl whitespace-nowrap transition-all cursor-pointer ${
-            activeTab === 'payments'
-              ? 'bg-white text-teal-900 shadow-xs border border-slate-200'
-              : 'text-slate-600 hover:text-slate-900'
-          }`}
-        >
-          <CreditCard className="w-4 h-4 text-teal-600" />
-          <span>فحص مدفوعات الطالب وسندات القبض</span>
         </button>
 
         <button
@@ -798,7 +727,6 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
                     <th className="py-3.5 px-4">مشاهدة الفيديو (مرات 0/3)</th>
                     <th className="py-3.5 px-4">أداء الامتحان والدرجة</th>
                     <th className="py-3.5 px-4">تسليم الواجب المنزلي</th>
-                    <th className="py-3.5 px-4">المصروفات</th>
                     <th className="py-3.5 px-4 text-center">إجراء المساعد مع ولي الأمر</th>
                   </tr>
                 </thead>
@@ -858,20 +786,6 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
                             score={rec.assignment_score}
                             maxScore={rec.assignment_score ? 15 : undefined}
                           />
-                        </td>
-
-                        {/* Payment Status (Private individual status) */}
-                        <td className="py-3.5 px-4">
-                          {rec.remaining_amount === 0 ? (
-                            <span className="text-emerald-700 font-semibold flex items-center gap-1">
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>مسدد بالكامل</span>
-                            </span>
-                          ) : (
-                            <span className="text-amber-700 font-semibold">
-                              متبقي {rec.remaining_amount} ج.م
-                            </span>
-                          )}
                         </td>
 
                         {/* Direct Follow-up Liaison Action */}
@@ -953,25 +867,6 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
               </button>
             </div>
 
-            {/* Action Card 3: Record Payment */}
-            <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs flex flex-col justify-between">
-              <div>
-                <div className="w-12 h-12 rounded-2xl bg-teal-50 text-teal-700 flex items-center justify-center text-xl mb-4">
-                  🧾
-                </div>
-                <h3 className="text-base font-bold text-slate-900">فحص مدفوعات الطالب وسندات القبض</h3>
-                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                  البحث بكود الطالب (#stu)، تسجيل إيصال سداد نقدي أو فودافون كاش، وإصدار سند قبض معتمد.
-                </p>
-              </div>
-              <button
-                onClick={() => setActiveTab('payments')}
-                className="mt-6 w-full py-2.5 px-4 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <Search className="w-4 h-4" />
-                <span>فحص كود الطالب والتحصيل</span>
-              </button>
-            </div>
           </div>
         </div>
       )}
@@ -1083,8 +978,6 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
                   <th className="py-3 px-4">الصف الدراسي</th>
                   <th className="py-3 px-4">رقم الهاتف</th>
                   <th className="py-3 px-4">بيانات ولي الأمر</th>
-                  <th className="py-3 px-4">حالة المصروفات</th>
-                  <th className="py-3 px-4 text-center">فحص السداد</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1098,11 +991,6 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
                     );
                   })
                   .map((stu) => {
-                    const studentInv = allInvoices.find((i) => i.student_id === stu.id);
-                    const remaining = studentInv
-                      ? (studentInv.remaining_amount ?? ((studentInv.amount || 450) - (studentInv.paid_amount || 0)))
-                      : 0;
-
                     return (
                       <tr key={stu.id} className="hover:bg-slate-50/70 transition-colors">
                         <td className="py-3.5 px-4 font-bold text-slate-900">
@@ -1119,26 +1007,6 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
                         <td className="py-3.5 px-4 text-slate-600">
                           <div>{stu.parent_name || '—'}</div>
                           <div className="text-[11px] text-slate-400">{stu.parent_email || ''}</div>
-                        </td>
-                        <td className="py-3.5 px-4">
-                          {studentInv?.status === 'paid' ? (
-                            <span className="text-emerald-700 font-semibold">مسدد بالكامل ✓</span>
-                          ) : (
-                            <span className="text-amber-700 font-semibold">
-                              متبقي {remaining} ج.م
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3.5 px-4 text-center">
-                          <button
-                            onClick={() => {
-                              setSelectedStudentLookupKey(stu.id);
-                              setActiveTab('payments');
-                            }}
-                            className="px-3 py-1.5 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold border border-teal-200 transition-colors cursor-pointer"
-                          >
-                            فحص الفواتير 💵
-                          </button>
                         </td>
                       </tr>
                     );
@@ -1366,191 +1234,6 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
       )}
 
       {/* ========================================================= */}
-      {/* TAB 7: STRICT PRIVACY STUDENT PAYMENT LOOKUP & COLLECTION */}
-      {/* "ميقدرش يشوف التوتال، هو ليه فيو لكل طالب ودفع ازاي ودفع كام" */}
-      {/* ========================================================= */}
-      {activeTab === 'payments' && (
-        <div className="space-y-6">
-          {/* Strict Privacy Notice */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="p-2 rounded-xl bg-teal-50 text-teal-700">
-                  <Lock className="w-5 h-5" />
-                </span>
-                <h3 className="text-lg font-black text-slate-900">
-                  فحص مدفوعات الطالب وسندات القبض (Student Financial Lookup)
-                </h3>
-              </div>
-              <p className="text-xs text-slate-500 mt-1">
-                صلاحية المساعد الإداري مبنية على <strong>الفحص الفردي عبر كود الطالب (#stu)</strong> لتسجيل سندات القبض والإيصالات، مع حجب الإجماليات المالية الكلية للمنظومة لحماية سرية الإيرادات.
-              </p>
-            </div>
-
-            {/* Student Code Lookup Dropdown */}
-            <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-200">
-              <span className="text-xs font-bold text-slate-600 whitespace-nowrap">اختر الطالب:</span>
-              <select
-                value={selectedStudentLookupKey}
-                onChange={(e) => setSelectedStudentLookupKey(e.target.value)}
-                className="text-xs font-semibold bg-white border border-slate-300 rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-teal-500"
-              >
-                {enrolledStudents.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    #{s.id} - {s.full_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Payment Receipt Banner if generated */}
-          {paymentReceipt && (
-            <div className="p-5 rounded-2xl bg-teal-50 border border-teal-200 text-teal-950 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="w-5 h-5 text-teal-700" />
-                  <span className="font-bold text-sm">تم إصدار سند القبض بنجاح للطالب ({paymentReceipt.studentName})</span>
-                </div>
-                <div className="text-xs text-teal-800 mt-1">
-                  المبلغ المسدد: {paymentReceipt.amount} ج.م • طريقة التحصيل: {paymentReceipt.method} • رقم العملية: {paymentReceipt.refNumber}
-                </div>
-              </div>
-              <button
-                onClick={() => window.print()}
-                className="py-2 px-3 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>طباعة سند القبض</span>
-              </button>
-            </div>
-          )}
-
-          {/* Selected Student Individual Financial Profile */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <span className="text-3xl">{activeStudentProfile?.avatar || '👨‍🎓'}</span>
-                <div>
-                  <h4 className="text-lg font-black text-slate-900">{activeStudentProfile?.full_name}</h4>
-                  <div className="text-xs text-slate-500 flex items-center gap-2 flex-wrap mt-0.5">
-                    <span className="font-mono text-teal-700 font-bold">#{activeStudentProfile?.id}</span>
-                    <span>·</span>
-                    <span>{activeStudentProfile?.grade_level}</span>
-                    <span>·</span>
-                    <span>ولي الأمر: {activeStudentProfile?.parent_name || '—'}</span>
-                    <span>·</span>
-                    <span>هاتف: {activeStudentProfile?.phone || '—'}</span>
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setPayAmount(
-                    activeStudentInvoice
-                      ? (activeStudentInvoice.remaining_amount ?? ((activeStudentInvoice.amount || 450) - (activeStudentInvoice.paid_amount || 0)))
-                      : 450
-                  );
-                  setShowPaymentModal(true);
-                }}
-                className="py-2.5 px-4 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center gap-2 cursor-pointer shadow-xs"
-              >
-                <Plus className="w-4 h-4" />
-                <span>تسجيل سند قبض / سداد كاش أو فودافون كاش</span>
-              </button>
-            </div>
-
-            {/* Individual Metrics */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
-                <span className="text-xs text-slate-500 font-bold">إجمالي المصروفات المستحقة</span>
-                <div className="text-xl font-black text-slate-900 mt-1">
-                  {activeStudentInvoice ? (activeStudentInvoice.amount || 450) : 450} ج.م
-                </div>
-                <div className="text-[11px] text-slate-400 mt-0.5">عن الشهر الدراسي الحالي</div>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200">
-                <span className="text-xs text-emerald-800 font-bold">المبلغ المسدد بالفعل</span>
-                <div className="text-xl font-black text-emerald-800 mt-1">
-                  {activeStudentInvoice ? (activeStudentInvoice.paid_amount || 0) : 0} ج.م
-                </div>
-                <div className="text-[11px] text-emerald-600 mt-0.5">موثق بإيصالات وسندات قبض</div>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200">
-                <span className="text-xs text-amber-800 font-bold">المتبقي المطلوب تحصيله</span>
-                <div className="text-xl font-black text-amber-800 mt-1">
-                  {activeStudentInvoice
-                    ? (activeStudentInvoice.remaining_amount ?? ((activeStudentInvoice.amount || 450) - (activeStudentInvoice.paid_amount || 0)))
-                    : 450} ج.م
-                </div>
-                <div className="text-[11px] text-amber-700 mt-0.5">
-                  {activeStudentInvoice?.status === 'paid' ? 'مسدد بالكامل ✓' : 'بانتظار السداد'}
-                </div>
-              </div>
-            </div>
-
-            {/* Transaction History for this Student */}
-            <div>
-              <h5 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">
-                سجل إيصالات وعمليات السداد السابقة للطالب
-              </h5>
-
-              {activeStudentTransactions.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-right text-xs">
-                    <thead className="bg-slate-50 text-slate-600 border-y border-slate-200">
-                      <tr>
-                        <th className="py-2.5 px-3">رقم العملية</th>
-                        <th className="py-2.5 px-3">تاريخ السداد</th>
-                        <th className="py-2.5 px-3">المبلغ</th>
-                        <th className="py-2.5 px-3">طريقة التحصيل</th>
-                        <th className="py-2.5 px-3">المستلم</th>
-                        <th className="py-2.5 px-3">الحالة</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {activeStudentTransactions.map((tx: PaymentTransaction) => (
-                        <tr key={tx.id}>
-                          <td className="py-2.5 px-3 font-mono font-bold text-slate-800">
-                            {tx.reference_number || tx.id}
-                          </td>
-                          <td className="py-2.5 px-3 text-slate-600">
-                            {new Date(tx.created_at).toLocaleDateString('ar-EG')}
-                          </td>
-                          <td className="py-2.5 px-3 font-bold text-emerald-700">{tx.amount} ج.م</td>
-                          <td className="py-2.5 px-3 font-medium text-slate-700">
-                            {tx.payment_method === 'vodafone_cash'
-                              ? '📱 فودافون كاش'
-                              : tx.payment_method === 'instapay'
-                              ? '⚡ انستاباي'
-                              : tx.payment_method === 'cash'
-                              ? '💵 نقدي بالسنتر'
-                              : tx.payment_method}
-                          </td>
-                          <td className="py-2.5 px-3 text-slate-500">{tx.notes || currentAssistant.full_name}</td>
-                          <td className="py-2.5 px-3">
-                            <span className="text-emerald-700 font-bold">معتمد ✓</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-500 text-center">
-                  لا توجد عمليات سداد مسجلة بعد لهذا الطالب. اضغط "تسجيل سند قبض" لإضافة إيصال.
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================= */}
       {/* TAB 8: COMPLAINTS & LIAISON DESK                         */}
       {/* ========================================================= */}
       {activeTab === 'complaints' && (
@@ -1722,7 +1405,7 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
       {/* MODAL 1: PARENT FOLLOW UP LIAISON (WHATSAPP + ALERT)       */}
       {/* ========================================================= */}
       {followUpStudent && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <ModalPortal className="bg-slate-900/60 backdrop-blur-xs">
           <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
@@ -1827,14 +1510,14 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
               </button>
             </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
       {/* ========================================================= */}
       {/* MODAL 2: ADD EXAM (AI, MANUAL, OR WORKSHEET)             */}
       {/* ========================================================= */}
       {showAddExamModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <ModalPortal className="bg-slate-900/60 backdrop-blur-xs">
           <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <div className="flex items-center gap-2">
@@ -2053,14 +1736,14 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
               </div>
             </form>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
       {/* ========================================================= */}
       {/* MODAL 3: ADD STUDENT                                     */}
       {/* ========================================================= */}
       {showAddStudentModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <ModalPortal className="bg-slate-900/60 backdrop-blur-xs">
           <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95">
             <h3 className="text-base font-black text-slate-900">
               تسجيل طالب جديد وإلحاقه بالمجموعة 👨‍🎓
@@ -2159,14 +1842,14 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
               </div>
             </form>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
       {/* ========================================================= */}
       {/* MODAL 4: UPLOAD MATERIAL                                 */}
       {/* ========================================================= */}
       {showAddMaterialModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <ModalPortal className="bg-slate-900/60 backdrop-blur-xs">
           <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95">
             <h3 className="text-base font-black text-slate-900">
               رفع مذكرة وماتريال تعليمية للطلاب 📚
@@ -2243,92 +1926,7 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
               </div>
             </form>
           </div>
-        </div>
-      )}
-
-      {/* ========================================================= */}
-      {/* MODAL 5: RECORD PAYMENT FOR SPECIFIC STUDENT              */}
-      {/* ========================================================= */}
-      {showPaymentModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95">
-            <h3 className="text-base font-black text-slate-900">
-              تسجيل تحصيل وسداد وإصدار سند قبض 💵
-            </h3>
-            <div className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-              الطالب: <strong>{activeStudentProfile?.full_name}</strong> (#{activeStudentProfile?.id})
-            </div>
-
-            <form onSubmit={handleRecordPayment} className="space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">المبلغ المحصل (ج.م) *</label>
-                  <input
-                    type="number"
-                    required
-                    min={1}
-                    value={payAmount}
-                    onChange={(e) => setPayAmount(Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-teal-500 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">طريقة السداد *</label>
-                  <select
-                    value={payMethod}
-                    onChange={(e) => setPayMethod(e.target.value as any)}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-teal-500 focus:outline-none"
-                  >
-                    <option value="vodafone_cash">📱 فودافون كاش</option>
-                    <option value="instapay">⚡ انستاباي Instapay</option>
-                    <option value="cash">💵 نقدي بالسنتر</option>
-                    <option value="bank_transfer">🏦 تحويل بنكي</option>
-                    <option value="other">💳 أخرى</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">رقم العملية / رقم الإيصال</label>
-                <input
-                  type="text"
-                  value={payRefNumber}
-                  onChange={(e) => setPayRefNumber(e.target.value)}
-                  placeholder="مثال: VF-98765432 أو رقم إيصال الدفتر"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-teal-500 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">ملاحظات التحصيل</label>
-                <input
-                  type="text"
-                  value={payNotes}
-                  onChange={(e) => setPayNotes(e.target.value)}
-                  placeholder="مثال: تم الاستلام نقداً في الحصة وإصدار سند قبض"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-teal-500 focus:outline-none"
-                />
-              </div>
-
-              <div className="pt-3 flex gap-2">
-                <button
-                  type="submit"
-                  disabled={paySubmitting}
-                  className="flex-1 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white font-bold cursor-pointer transition-all"
-                >
-                  {paySubmitting ? 'جاري التسجيل على السيرفر... ⏳' : 'تأكيد السداد وإصدار سند القبض'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowPaymentModal(false)}
-                  className="py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold cursor-pointer"
-                >
-                  إلغاء
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        </ModalPortal>
       )}
     </div>
   );

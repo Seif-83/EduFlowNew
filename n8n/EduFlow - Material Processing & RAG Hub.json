@@ -73,7 +73,6 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ $('UPLOAD: CODE | Parse Request').first().json.request_body }}",
         "options": {
           "response": {
             "response": {
@@ -81,7 +80,8 @@
               "neverError": true
             }
           }
-        }
+        },
+        "jsonBody": "={{ $('UPLOAD: CODE | Parse Request').first().json.request_body }}"
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -628,7 +628,6 @@
         "url": "https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_material_chunks",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ {\n  material_id: $json.material_id,\n  chunk_index: $json.chunk_index,\n  content: $json.content,\n  embedding: JSON.stringify($json.embedding),\n  embedding_model: $json.embedding_model,\n  token_count: $json.token_count\n} }}",
         "options": {},
         "sendHeaders": true,
         "headerParameters": {
@@ -642,7 +641,8 @@
               "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
             }
           ]
-        }
+        },
+        "jsonBody": "={{ {\n  material_id: $json.material_id,\n  chunk_index: $json.chunk_index,\n  content: $json.content,\n  embedding: JSON.stringify($json.embedding),\n  embedding_model: $json.embedding_model,\n  token_count: $json.token_count\n} }}"
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -680,8 +680,8 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ {\n  rag_chunk_count: $json.chunks_count\n} }}",
-        "options": {}
+        "options": {},
+        "jsonBody": "={{ {\n  rag_chunk_count: $json.chunks_count\n} }}"
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -698,7 +698,6 @@
         "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials?id=eq.' + $('PROCESS: TRIGGER | Receive Material ID').first().json.material_id }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"rag_status\": \"completed\"\n}",
         "options": {},
         "sendHeaders": true,
         "headerParameters": {
@@ -712,7 +711,8 @@
               "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
             }
           ]
-        }
+        },
+        "jsonBody": "{\n  \"rag_status\": \"completed\"\n}"
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -776,7 +776,6 @@
         "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials?id=eq.' + $('PROCESS: TRIGGER | Receive Material ID').first().json.material_id }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ \n  {\n    \"rag_status\": \"failed\",\n    \"rag_error\": $json.error?.message || $json.message || \"Embedding generation failed\"\n  }\n}}",
         "options": {},
         "sendHeaders": true,
         "headerParameters": {
@@ -790,7 +789,8 @@
               "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
             }
           ]
-        }
+        },
+        "jsonBody": "={{ \n  {\n    \"rag_status\": \"failed\",\n    \"rag_error\": $json.error?.message || $json.message || \"Embedding generation failed\"\n  }\n}}"
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -849,7 +849,6 @@
         "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials?id=eq.' + $('PROCESS: TRIGGER | Receive Material ID').first().json.material_id }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"rag_status\": \"processing\",\n  \"rag_error\": null\n}",
         "options": {},
         "sendHeaders": true,
         "headerParameters": {
@@ -863,7 +862,8 @@
               "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
             }
           ]
-        }
+        },
+        "jsonBody": "{\n  \"rag_status\": \"processing\",\n  \"rag_error\": null\n}"
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -880,7 +880,6 @@
         "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials?id=eq.' + $('PROCESS: TRIGGER | Receive Material ID').first().json.material_id }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"rag_status\": \"failed\",\n  \"rag_error\": \"Could not extract text from material\"\n}",
         "options": {},
         "sendHeaders": true,
         "headerParameters": {
@@ -894,7 +893,8 @@
               "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
             }
           ]
-        }
+        },
+        "jsonBody": "{\n  \"rag_status\": \"failed\",\n  \"rag_error\": \"Could not extract text from material\"\n}"
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -911,7 +911,6 @@
         "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials?id=eq.' + $('PROCESS: TRIGGER | Receive Material ID').first().json.material_id }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"rag_status\": \"failed\",\n  \"rag_error\": \"Failed to download course material\"\n}",
         "options": {},
         "sendHeaders": true,
         "headerParameters": {
@@ -925,7 +924,8 @@
               "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
             }
           ]
-        }
+        },
+        "jsonBody": "{\n  \"rag_status\": \"failed\",\n  \"rag_error\": \"Failed to download course material\"\n}"
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -983,7 +983,6 @@
         "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials?id=eq.' + $('PROCESS: TRIGGER | Receive Material ID').first().json.material_id }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"rag_status\": \"failed\",\n  \"rag_error\": \"Material file URL is missing\"\n}",
         "options": {},
         "sendHeaders": true,
         "headerParameters": {
@@ -997,7 +996,8 @@
               "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
             }
           ]
-        }
+        },
+        "jsonBody": "{\n  \"rag_status\": \"failed\",\n  \"rag_error\": \"Material file URL is missing\"\n}"
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -1014,7 +1014,6 @@
         "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/rest/v1/course_materials?id=eq.' + $('PROCESS: TRIGGER | Receive Material ID').first().json.material_id }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"rag_status\": \"failed\",\n  \"rag_error\": \"Failed to save course material chunks\"\n}",
         "options": {},
         "sendHeaders": true,
         "headerParameters": {
@@ -1028,7 +1027,8 @@
               "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
             }
           ]
-        }
+        },
+        "jsonBody": "{\n  \"rag_status\": \"failed\",\n  \"rag_error\": \"Failed to save course material chunks\"\n}"
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
@@ -1107,7 +1107,6 @@
         "url": "={{ 'https://zhbntxnsdznpdqmjyxpp.supabase.co/storage/v1/object/sign/course-materials/' + $json.storage_path }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ expiresIn: 300 }) }}",
         "options": {},
         "sendHeaders": true,
         "headerParameters": {
@@ -1121,7 +1120,8 @@
               "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoYm50eG5zZHpucGRxbWp5eHBwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MzkzMDY2NCwiZXhwIjoyMTA5NTA2NjY0fQ.6HLb01zQpGGwn6Hp_HGt3MlMhl8M5i9wXMqxWEgUdwA"
             }
           ]
-        }
+        },
+        "jsonBody": "={{ JSON.stringify({ expiresIn: 300 }) }}"
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1643,7 +1643,6 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ query_embedding: JSON.stringify($json.embedding), match_count: 8, filter_material_ids: $json.material_ids }) }}",
         "options": {
           "response": {
             "response": {
@@ -1651,7 +1650,8 @@
               "neverError": true
             }
           }
-        }
+        },
+        "jsonBody": "={{ JSON.stringify({ query_embedding: JSON.stringify($json.embedding), match_count: 8, filter_material_ids: $json.material_ids }) }}"
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,

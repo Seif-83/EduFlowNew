@@ -2,6 +2,7 @@ import React from 'react';
 import { X, Check } from 'lucide-react';
 import { Profile } from '../../types/database';
 import { db } from '../../services/mockDatabase';
+import { ModalPortal } from './ModalPortal';
 
 interface StudentSwitcherModalProps {
   currentStudent: Profile;
@@ -17,7 +18,7 @@ export const StudentSwitcherModal: React.FC<StudentSwitcherModalProps> = ({
   const students = db.getStudents();
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <ModalPortal className="bg-slate-900/60 backdrop-blur-sm">
       <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[85vh]">
         <div className="p-5 border-b border-slate-100 flex items-center justify-between">
           <div>
@@ -80,6 +81,6 @@ export const StudentSwitcherModal: React.FC<StudentSwitcherModalProps> = ({
           })}
         </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 };

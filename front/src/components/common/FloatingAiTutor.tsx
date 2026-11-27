@@ -14,8 +14,7 @@ import {
 } from 'lucide-react';
 import { Profile, AiMessage } from '../../types/database';
 import { db } from '../../services/mockDatabase';
-import { sendN8nEvent } from '../../services/n8nService';
-import { askGeminiTutor } from '../../services/geminiService';
+import { askTutor } from '../../services/tutorService';
 
 interface FloatingAiTutorProps {
   currentStudent: Profile;
@@ -62,38 +61,10 @@ export const FloatingAiTutor: React.FC<FloatingAiTutorProps> = ({ currentStudent
     setChatMessages([...db.getAiMessages(currentStudent.id)]);
     setIsTyping(true);
 
-    // 1. Dispatch to n8n AI Tutor Agent
     try {
-      const n8nRes = await sendN8nEvent('ai_tutor_chat', {
-        question: query,
-        grade: currentStudent.grade_level || 'المرحلة الإعدادية',
-        student_name: currentStudent.full_name,
-        student_id: currentStudent.id,
-      });
-
-      const aiReply = n8nRes.data?.data?.reply || n8nRes.data?.reply;
-      if (n8nRes.success && aiReply) {
-        db.updateLastAiAssistantMessage(currentStudent.id, aiReply);
-        setChatMessages([...db.getAiMessages(currentStudent.id)]);
-        setIsTyping(false);
-        return;
-      }
-    } catch (err) {
-      console.info('n8n AI agent fallback:', err);
-    }
-
-    // 2. Direct Gemini fallback
-    try {
-      const geminiAnswer = await askGeminiTutor(
-        query,
-        currentStudent.grade_level || 'المرحلة الإعدادية'
-      );
-      if (geminiAnswer) {
-        db.updateLastAiAssistantMessage(currentStudent.id, geminiAnswer);
-        setChatMessages([...db.getAiMessages(currentStudent.id)]);
-      }
-    } catch {
-      // Local fallback in mock database
+      const r = await askTutor(currentStudent, query);
+      db.updateLastAiAssistantMessage(currentStudent.id, r.text);
+      setChatMessages([...db.getAiMessages(currentStudent.id)]);
     } finally {
       setIsTyping(false);
     }

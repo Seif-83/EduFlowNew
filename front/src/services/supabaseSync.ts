@@ -30,7 +30,35 @@ export function newUuid(): string {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuid = (v: any): v is string => typeof v === 'string' && UUID_RE.test(v);
-const u = (v: any): string | null => (isUuid(v) ? v : null);
+/**
+ * Deterministic UUID for legacy local ids ('tea-1', 'g-1', 'stu-123456', ...).
+ * Rows with non-UUID ids used to be skipped by the sync entirely, so groups
+ * and lessons created on one device never reached Supabase. syncId gives
+ * every local id a stable server UUID (the same input always maps to the
+ * same UUID, on every device), so re-syncing is idempotent and never
+ * duplicates rows.
+ */
+const fnv1a = (str: string, seed: number): number => {
+  let h = seed >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+};
+
+export function syncId(id: string): string {
+  if (isUuid(id)) return id;
+  const s = 'eduflow-local:' + id;
+  const hex = (n: number) => n.toString(16).padStart(8, '0');
+  const h = (hex(fnv1a(s, 0x811c9dc5)) + hex(fnv1a(s, 0x9e3779b9)) + hex(fnv1a(s, 0x85ebca6b)) + hex(fnv1a(s, 0xc2b2ae35))).split('');
+  h[12] = '3'; // UUID version 3 (name-based)
+  h[16] = ((parseInt(h[16], 16) & 0x3) | 0x8).toString(16); // RFC variant
+  const str = h.join('');
+  return `${str.slice(0, 8)}-${str.slice(8, 12)}-${str.slice(12, 16)}-${str.slice(16, 20)}-${str.slice(20)}`;
+}
+
+const u = (v: any): string | null => (typeof v === 'string' && v ? syncId(v) : null);
 
 // ---------- Entity -> DB row mappers (return null to skip syncing) ----------
 
@@ -38,9 +66,9 @@ type Row = Record<string, any> | null;
 
 const mappers: Record<string, (r: any) => Row> = {
   profiles: (p) =>
-    isUuid(p.id)
+    p.id
       ? pick({
-          id: p.id,
+          id: syncId(p.id),
           full_name: p.full_name,
           email: p.email,
           phone: p.phone ?? null,
@@ -54,9 +82,9 @@ const mappers: Record<string, (r: any) => Row> = {
       : null,
 
   courses: (c) =>
-    isUuid(c.id)
+    c.id
       ? pick({
-          id: c.id,
+          id: syncId(c.id),
           title: c.title,
           description: c.description ?? null,
           created_by: u(c.created_by),
@@ -66,11 +94,11 @@ const mappers: Record<string, (r: any) => Row> = {
       : null,
 
   course_groups: (g) =>
-    isUuid(g.id) && isUuid(g.course_id) && isUuid(g.teacher_id)
+    g.id && g.course_id && g.teacher_id
       ? pick({
-          id: g.id,
-          course_id: g.course_id,
-          teacher_id: g.teacher_id,
+          id: syncId(g.id),
+          course_id: syncId(g.course_id),
+          teacher_id: syncId(g.teacher_id),
           name: g.name,
           start_date: g.start_date ?? null,
           end_date: g.end_date ?? null,
@@ -80,21 +108,21 @@ const mappers: Record<string, (r: any) => Row> = {
       : null,
 
   enrollments: (e) =>
-    isUuid(e.id) && isUuid(e.student_id) && isUuid(e.group_id)
+    e.id && e.student_id && e.group_id
       ? pick({
-          id: e.id,
-          student_id: e.student_id,
-          group_id: e.group_id,
+          id: syncId(e.id),
+          student_id: syncId(e.student_id),
+          group_id: syncId(e.group_id),
           enrolled_at: e.enrolled_at,
           status: e.status || 'active',
         })
       : null,
 
   sessions: (s) =>
-    isUuid(s.id) && isUuid(s.group_id)
+    s.id && s.group_id
       ? pick({
-          id: s.id,
-          group_id: s.group_id,
+          id: syncId(s.id),
+          group_id: syncId(s.group_id),
           title: s.title,
           description: s.description ?? null,
           session_number: s.session_number ?? 1,
@@ -107,11 +135,11 @@ const mappers: Record<string, (r: any) => Row> = {
       : null,
 
   video_plays: (v) =>
-    isUuid(v.id) && isUuid(v.session_id) && isUuid(v.student_id)
+    v.id && v.session_id && v.student_id
       ? pick({
-          id: v.id,
-          session_id: v.session_id,
-          student_id: v.student_id,
+          id: syncId(v.id),
+          session_id: syncId(v.session_id),
+          student_id: syncId(v.student_id),
           started_at: v.started_at,
           ended_at: v.ended_at ?? null,
           play_number: v.play_number ?? 1,
@@ -120,10 +148,10 @@ const mappers: Record<string, (r: any) => Row> = {
       : null,
 
   exams: (e) =>
-    isUuid(e.id) && isUuid(e.session_id)
+    e.id && e.session_id
       ? pick({
-          id: e.id,
-          session_id: e.session_id,
+          id: syncId(e.id),
+          session_id: syncId(e.session_id),
           title: e.title,
           passing_score: e.passing_score ?? 70,
           duration_minutes: e.duration_minutes ?? null,
@@ -140,10 +168,10 @@ const mappers: Record<string, (r: any) => Row> = {
       : null,
 
   questions: (q) =>
-    isUuid(q.id) && isUuid(q.exam_id)
+    q.id && q.exam_id
       ? pick({
-          id: q.id,
-          exam_id: q.exam_id,
+          id: syncId(q.id),
+          exam_id: syncId(q.exam_id),
           question_text: q.question_text,
           question_type: q.question_type || 'mcq',
           options: Array.isArray(q.options) ? q.options : [],
@@ -154,11 +182,11 @@ const mappers: Record<string, (r: any) => Row> = {
       : null,
 
   exam_attempts: (a) =>
-    isUuid(a.id) && isUuid(a.exam_id) && isUuid(a.student_id)
+    a.id && a.exam_id && a.student_id
       ? pick({
-          id: a.id,
-          exam_id: a.exam_id,
-          student_id: a.student_id,
+          id: syncId(a.id),
+          exam_id: syncId(a.exam_id),
+          student_id: syncId(a.student_id),
           score: a.score ?? null,
           total_score: a.total_score ?? null,
           passed: !!a.passed,
@@ -168,10 +196,10 @@ const mappers: Record<string, (r: any) => Row> = {
       : null,
 
   assignments: (a) =>
-    isUuid(a.id) && isUuid(a.group_id)
+    a.id && a.group_id
       ? pick({
-          id: a.id,
-          group_id: a.group_id,
+          id: syncId(a.id),
+          group_id: syncId(a.group_id),
           session_id: u(a.session_id),
           title: a.title,
           description: a.description ?? null,
@@ -184,11 +212,11 @@ const mappers: Record<string, (r: any) => Row> = {
       : null,
 
   assignment_submissions: (s) =>
-    isUuid(s.id) && isUuid(s.assignment_id) && isUuid(s.student_id)
+    s.id && s.assignment_id && s.student_id
       ? pick({
-          id: s.id,
-          assignment_id: s.assignment_id,
-          student_id: s.student_id,
+          id: syncId(s.id),
+          assignment_id: syncId(s.assignment_id),
+          student_id: syncId(s.student_id),
           submission_text: s.submission_text ?? null,
           file_url: s.file_url ?? null,
           score: s.score ?? null,
@@ -201,74 +229,23 @@ const mappers: Record<string, (r: any) => Row> = {
       : null,
 
   attendance: (a) =>
-    isUuid(a.id) && isUuid(a.session_id) && isUuid(a.student_id)
+    a.id && a.session_id && a.student_id
       ? pick({
-          id: a.id,
-          session_id: a.session_id,
-          student_id: a.student_id,
+          id: syncId(a.id),
+          session_id: syncId(a.session_id),
+          student_id: syncId(a.student_id),
           status: a.status,
           recorded_by: u(a.recorded_by),
           recorded_at: a.recorded_at,
         })
       : null,
 
-  student_payments: (p) =>
-    isUuid(p.id) && isUuid(p.student_id) && isUuid(p.group_id)
-      ? pick({
-          id: p.id,
-          student_id: p.student_id,
-          group_id: p.group_id,
-          session_id: u(p.session_id),
-          amount: p.amount ?? p.amount_due ?? 0,
-          currency: p.currency || 'EGP',
-          period_label: p.period_label ?? p.cycle_month ?? null,
-          due_date: p.due_date ?? null,
-          status: p.status || 'unpaid',
-          payment_method: p.payment_method ?? null,
-          paid_at: p.paid_at ?? null,
-          recorded_by: u(p.recorded_by),
-          notes: p.notes ?? null,
-          waived_reason: p.waived_reason ?? null,
-          waived_at: p.waived_at ?? null,
-          waived_by: u(p.waived_by),
-          paid_amount: p.paid_amount ?? p.amount_paid ?? 0,
-          created_at: p.created_at,
-        })
-      : null,
-
-  payment_transactions: (t) =>
-    isUuid(t.id) && isUuid(t.student_payment_id)
-      ? pick({
-          id: t.id,
-          student_payment_id: t.student_payment_id,
-          amount: t.amount ?? 0,
-          payment_method: t.payment_method || 'cash',
-          paid_at: t.paid_at,
-          recorded_by: u(t.recorded_by),
-          notes: t.notes ?? null,
-          reference_number: t.reference_number ?? null,
-          created_at: t.created_at,
-        })
-      : null,
-
-  group_billing_settings: (b) =>
-    isUuid(b.id) && isUuid(b.group_id)
-      ? pick({
-          id: b.id,
-          group_id: b.group_id,
-          payment_type: b.payment_type || 'monthly',
-          amount: b.amount ?? 0,
-          currency: b.currency || 'EGP',
-          created_at: b.created_at,
-        })
-      : null,
-
   teacher_compensation: (t) =>
-    isUuid(t.id) && isUuid(t.group_id) && isUuid(t.teacher_id)
+    t.id && t.group_id && t.teacher_id
       ? pick({
-          id: t.id,
-          group_id: t.group_id,
-          teacher_id: t.teacher_id,
+          id: syncId(t.id),
+          group_id: syncId(t.group_id),
+          teacher_id: syncId(t.teacher_id),
           compensation_type: t.compensation_type || 'per_session',
           amount: t.amount ?? 0,
           currency: t.currency || 'EGP',
@@ -277,11 +254,11 @@ const mappers: Record<string, (r: any) => Row> = {
       : null,
 
   teacher_earnings: (t) =>
-    isUuid(t.id) && isUuid(t.teacher_id) && isUuid(t.group_id)
+    t.id && t.teacher_id && t.group_id
       ? pick({
-          id: t.id,
-          teacher_id: t.teacher_id,
-          group_id: t.group_id,
+          id: syncId(t.id),
+          teacher_id: syncId(t.teacher_id),
+          group_id: syncId(t.group_id),
           session_id: u(t.session_id),
           amount: t.amount ?? 0,
           currency: t.currency || 'EGP',
@@ -294,10 +271,10 @@ const mappers: Record<string, (r: any) => Row> = {
       : null,
 
   notifications: (n) =>
-    isUuid(n.id) && isUuid(n.user_id)
+    n.id && n.user_id
       ? pick({
-          id: n.id,
-          user_id: n.user_id,
+          id: syncId(n.id),
+          user_id: syncId(n.user_id),
           title: n.title,
           message: n.message,
           notification_type: n.notification_type || n.type || 'general',
@@ -308,10 +285,10 @@ const mappers: Record<string, (r: any) => Row> = {
       : null,
 
   complaints: (c) =>
-    isUuid(c.id) && isUuid(c.submitted_by)
+    c.id && c.submitted_by
       ? pick({
-          id: c.id,
-          submitted_by: c.submitted_by,
+          id: syncId(c.id),
+          submitted_by: syncId(c.submitted_by),
           subject: c.subject,
           description: c.description,
           category: c.category ?? null,
@@ -325,9 +302,9 @@ const mappers: Record<string, (r: any) => Row> = {
       : null,
 
   course_materials: (m) =>
-    isUuid(m.id) && (isUuid(m.course_id) || isUuid(m.session_id) || isUuid(m.group_id) || !!m.grade_level)
+    m.id && (m.course_id || m.session_id || m.group_id || !!m.grade_level)
       ? pick({
-          id: m.id,
+          id: syncId(m.id),
           course_id: u(m.course_id),
           session_id: u(m.session_id),
           group_id: u(m.group_id),
@@ -347,33 +324,33 @@ const mappers: Record<string, (r: any) => Row> = {
       : null,
 
   student_notes: (n) =>
-    isUuid(n.id) && isUuid(n.student_id) && isUuid(n.teacher_id) && isUuid(n.group_id)
+    n.id && n.student_id && n.teacher_id && n.group_id
       ? pick({
-          id: n.id,
-          student_id: n.student_id,
-          teacher_id: n.teacher_id,
-          group_id: n.group_id,
+          id: syncId(n.id),
+          student_id: syncId(n.student_id),
+          teacher_id: syncId(n.teacher_id),
+          group_id: syncId(n.group_id),
           note: n.note,
           created_at: n.created_at,
         })
       : null,
 
   parent_student_links: (l) =>
-    isUuid(l.id) && isUuid(l.parent_id) && isUuid(l.student_id)
+    l.id && l.parent_id && l.student_id
       ? pick({
-          id: l.id,
-          parent_id: l.parent_id,
-          student_id: l.student_id,
+          id: syncId(l.id),
+          parent_id: syncId(l.parent_id),
+          student_id: syncId(l.student_id),
           status: l.status || 'pending',
           created_at: l.created_at,
         })
       : null,
 
   ai_conversations: (c) =>
-    isUuid(c.id) && isUuid(c.user_id)
+    c.id && c.user_id
       ? pick({
-          id: c.id,
-          user_id: c.user_id,
+          id: syncId(c.id),
+          user_id: syncId(c.user_id),
           group_id: u(c.group_id),
           title: c.title ?? null,
           created_at: c.created_at,
@@ -382,10 +359,10 @@ const mappers: Record<string, (r: any) => Row> = {
       : null,
 
   ai_messages: (m) =>
-    isUuid(m.id) && isUuid(m.conversation_id)
+    m.id && m.conversation_id
       ? pick({
-          id: m.id,
-          conversation_id: m.conversation_id,
+          id: syncId(m.id),
+          conversation_id: syncId(m.conversation_id),
           sender: m.sender,
           message: m.message,
           metadata: m.metadata ?? {},
@@ -407,9 +384,6 @@ const COLLECTION_TO_TABLE: Record<string, string> = {
   assignments: 'assignments',
   submissions: 'assignment_submissions',
   attendance: 'attendance',
-  studentPayments: 'student_payments',
-  paymentTransactions: 'payment_transactions',
-  billingSettings: 'group_billing_settings',
   teacherComp: 'teacher_compensation',
   teacherEarnings: 'teacher_earnings',
   complaints: 'complaints',
@@ -477,7 +451,9 @@ export function collectSyncRows(state: any): SyncCollection[] {
           }
         }
       }
+      out.push({ name, table, rows });
       out.push({ name: 'questions', table: 'questions', rows: qRows });
+      continue;
     }
     out.push({ name, table, rows });
   }
@@ -495,7 +471,8 @@ export interface SyncOp {
 
 const failedOnce = new Set<string>();
 
-async function runOps(ops: SyncOp[]): Promise<void> {
+async function runOps(ops: SyncOp[]): Promise<Set<string>> {
+  const failed = new Set<string>();
   const byTable = new Map<string, SyncOp[]>();
   for (const op of ops) {
     const arr = byTable.get(op.table) || [];
@@ -508,18 +485,24 @@ async function runOps(ops: SyncOp[]): Promise<void> {
     try {
       if (upserts.length) {
         const { error } = await supabaseAdmin.from(table).upsert(upserts, { onConflict: 'id' });
-        if (error) logSyncError(table, 'upsert', error);
-        else failedOnce.delete(table + ':upsert');
+        if (error) {
+          logSyncError(table, 'upsert', error);
+          upserts.forEach((r) => failed.add(table + '|' + r.id));
+        } else failedOnce.delete(table + ':upsert');
       }
       if (deletes.length) {
         const { error } = await supabaseAdmin.from(table).delete().in('id', deletes);
-        if (error) logSyncError(table, 'delete', error);
-        else failedOnce.delete(table + ':delete');
+        if (error) {
+          logSyncError(table, 'delete', error);
+          deletes.forEach((id) => failed.add(table + '|' + id));
+        } else failedOnce.delete(table + ':delete');
       }
     } catch (err) {
       logSyncError(table, 'network', err);
+      tableOps.forEach((o) => failed.add(table + '|' + o.id));
     }
   }
+  return failed;
 }
 
 function logSyncError(table: string, op: string, err: any) {
@@ -562,12 +545,43 @@ export function diffAndPush(
     next[col.table] = cur;
   }
   if (ops.length) {
-    runOps(ops).catch((err) => console.warn('[SupabaseSync] push failed:', err));
+    runOps(ops)
+      .then((failed) => {
+        // Keep failed rows out of the snapshot so the next persist retries them.
+        for (const key of failed) {
+          const sep = key.indexOf('|');
+          const map = next[key.slice(0, sep)];
+          if (map) map.delete(key.slice(sep + 1));
+        }
+      })
+      .catch((err) => console.warn('[SupabaseSync] push failed:', err));
   }
   return next;
 }
 
 /** Snapshot the current state without pushing anything. */
+
+/**
+ * Snapshot marking only the rows that already exist on the server as synced.
+ * Local rows the server does not have stay pending, so the next persist
+ * pushes them (used right after hydration).
+ */
+export function snapshotForServerRows(state: any, serverRows: Record<string, any[]>): Record<string, Map<string, string>> {
+  const serverIds: Record<string, Set<string>> = {};
+  for (const [table, rows] of Object.entries(serverRows)) {
+    serverIds[table] = new Set((Array.isArray(rows) ? rows : []).map((r: any) => r.id));
+  }
+  const snap: Record<string, Map<string, string>> = {};
+  for (const col of collectSyncRows(state)) {
+    const m = new Map<string, string>();
+    for (const { id, row } of col.rows) {
+      if (serverIds[col.table]?.has(id)) m.set(id, stableStringify(row));
+    }
+    snap[col.table] = m;
+  }
+  return snap;
+}
+
 export function snapshotOnly(state: any): Record<string, Map<string, string>> {
   const snap: Record<string, Map<string, string>> = {};
   for (const col of collectSyncRows(state)) {
@@ -593,9 +607,6 @@ const PULL_ORDER = [
   'assignments',
   'assignment_submissions',
   'attendance',
-  'student_payments',
-  'payment_transactions',
-  'group_billing_settings',
   'teacher_compensation',
   'teacher_earnings',
   'complaints',
@@ -761,48 +772,6 @@ export const fromDb: Record<string, (r: any) => any> = {
     status: r.status,
     recorded_by: r.recorded_by || undefined,
     recorded_at: r.recorded_at,
-  }),
-  student_payments: (r) => ({
-    id: r.id,
-    student_id: r.student_id,
-    group_id: r.group_id,
-    session_id: r.session_id || undefined,
-    amount: Number(r.amount ?? 0),
-    currency: r.currency || 'EGP',
-    period_label: r.period_label || undefined,
-    due_date: r.due_date || undefined,
-    status: r.status || 'unpaid',
-    payment_method: r.payment_method || undefined,
-    paid_at: r.paid_at || undefined,
-    recorded_by: r.recorded_by || undefined,
-    notes: r.notes || undefined,
-    waived_reason: r.waived_reason || undefined,
-    waived_at: r.waived_at || undefined,
-    waived_by: r.waived_by || undefined,
-    paid_amount: Number(r.paid_amount ?? 0),
-    amount_due: Number(r.amount ?? 0),
-    amount_paid: Number(r.paid_amount ?? 0),
-    remaining_amount: Math.max(0, Number(r.amount ?? 0) - Number(r.paid_amount ?? 0)),
-    created_at: r.created_at,
-  }),
-  payment_transactions: (r) => ({
-    id: r.id,
-    student_payment_id: r.student_payment_id,
-    amount: Number(r.amount ?? 0),
-    payment_method: r.payment_method || 'cash',
-    paid_at: r.paid_at,
-    recorded_by: r.recorded_by || '',
-    notes: r.notes || undefined,
-    reference_number: r.reference_number || undefined,
-    created_at: r.created_at,
-  }),
-  group_billing_settings: (r) => ({
-    id: r.id,
-    group_id: r.group_id,
-    payment_type: r.payment_type || 'monthly',
-    amount: Number(r.amount ?? 0),
-    currency: r.currency || 'EGP',
-    created_at: r.created_at,
   }),
   teacher_compensation: (r) => ({
     id: r.id,

@@ -27,41 +27,21 @@ import {
   StudentFollowUpRecord,
 } from '../types/database';
 import { sendN8nEvent, callStudentWorkflow, callAuditWorkflow, callNotificationsWorkflow, callMaterialIngestWorkflow, callExamsWorkflow, callPaymentsWorkflow } from './n8nService';
-import { supabase, supabaseAdmin, createUserInSupabase, createStudentInSupabase, resetSupabaseTestStudents, deleteAuthUserInSupabase } from './supabaseClient';
-import { diffAndPush, snapshotOnly, pullAll, fromDb, newUuid, isUuid } from './supabaseSync';
+import { supabase, supabaseAdmin, createUserInSupabase, createStudentInSupabase, resetSupabaseTestStudents, deleteAuthUserInSupabase, verifySupabasePassword } from './supabaseClient';
+import { diffAndPush, snapshotOnly, snapshotForServerRows, pullAll, fromDb, newUuid, isUuid, syncId } from './supabaseSync';
 
-const STORAGE_KEY = 'eduflow_db_v3';
+// Round 11: versioned local reset. Bumping the storage key abandons the old
+// local store (v3 and older) entirely, so rows deleted from Supabase in the
+// clean-slate wipe can never be re-uploaded from a stale browser.
+const STORAGE_KEY = 'eduflow_db_v4';
+const LEGACY_STORAGE_KEYS = ['eduflow_db', 'eduflow_db_v1', 'eduflow_db_v2', 'eduflow_db_v3'];
 
 // Seed Initial Database State
+// Round 11 (clean slate): the only built-in account is the admin. Teachers
+// and assistants are created by the admin from the admin portal and live in
+// Supabase; no demo staff, courses or groups are seeded anymore.
 function getInitialData() {
   const profiles: Profile[] = [
-    {
-      id: 'tea-1',
-      full_name: 'أ. أحمد رضوان (معلم علوم وفيزياء)',
-      email: 'ahmed.radwan@eduflow.edu',
-      phone: '01012345678',
-      role: 'teacher',
-      avatar: '👨‍🏫',
-      created_at: '2026-08-15T09:00:00Z',
-    },
-    {
-      id: 'tea-2',
-      full_name: 'د. مروة محمود (معلمة رياضيات وجبر)',
-      email: 'marwa.mahmoud@eduflow.edu',
-      phone: '01122334455',
-      role: 'teacher',
-      avatar: '👩‍🏫',
-      created_at: '2026-08-20T09:00:00Z',
-    },
-    {
-      id: 'ast-1',
-      full_name: 'أ. كريم نبيل (المساعد التعليمي والمنسق الأكاديمي)',
-      email: 'karim.nabil@eduflow.edu',
-      phone: '01044332211',
-      role: 'assistant',
-      avatar: '🧑‍💻',
-      created_at: '2026-08-10T08:30:00Z',
-    },
     {
       id: 'adm-1',
       full_name: 'م. سيف عمرو (مدير المنظومة الأكاديمية)',
@@ -73,61 +53,9 @@ function getInitialData() {
     },
   ];
 
-  const courses: Course[] = [
-    {
-      id: 'c-1',
-      title: 'العلوم العامة والأحياء - الصف الثاني الإعدادي',
-      description: 'المنهج المتكامل لتدريس الجهاز الدوري، التركيب الذري، والحركة والضغط الجوي.',
-      status: 'published',
-      created_by: 'tea-1',
-      created_at: '2026-08-25T10:00:00Z',
-    },
-    {
-      id: 'c-2',
-      title: 'الرياضيات والجبر - الصف الثاني الإعدادي',
-      description: 'التحليل الرياضي، حل المعادلات، والهندسة التحليلية مع تطبيقات عملية.',
-      status: 'published',
-      created_by: 'tea-2',
-      created_at: '2026-08-28T10:00:00Z',
-    },
-    {
-      id: 'c-3',
-      title: 'الفيزياء الأساسية - المرحلة الثانوية',
-      description: 'الميكانيكا وقوانين الحركة وقوانين نيوتن والطاقة.',
-      status: 'published',
-      created_by: 'tea-1',
-      created_at: '2026-09-01T10:00:00Z',
-    },
-  ];
+  const courses: Course[] = [];
 
-  const groups: CourseGroup[] = [
-    {
-      id: 'g-1',
-      course_id: 'c-1',
-      teacher_id: 'tea-1',
-      name: 'مجموعة الأوائل - علوم 2 إعدادي (السبت والثلاثاء)',
-      start_date: '2026-09-15',
-      end_date: '2027-01-30',
-      status: 'active',
-      created_at: '2026-09-01T12:00:00Z',
-      course_title: 'العلوم العامة والأحياء - الصف الثاني الإعدادي',
-      teacher_name: 'أ. أحمد رضوان',
-      active_students: 0,
-    },
-    {
-      id: 'g-2',
-      course_id: 'c-2',
-      teacher_id: 'tea-2',
-      name: 'مجموعة العباقرة - رياضيات 2 إعدادي',
-      start_date: '2026-09-16',
-      end_date: '2027-01-30',
-      status: 'active',
-      created_at: '2026-09-02T12:00:00Z',
-      course_title: 'الرياضيات والجبر - الصف الثاني الإعدادي',
-      teacher_name: 'د. مروة محمود',
-      active_students: 0,
-    },
-  ];
+  const groups: CourseGroup[] = [];
 
   const enrollments: Enrollment[] = [];
   const sessions: Session[] = [];
@@ -138,48 +66,13 @@ function getInitialData() {
   const submissions: AssignmentSubmission[] = [];
   const attendance: Attendance[] = [];
 
-  const billingSettings: GroupBillingSettings[] = [
-    {
-      id: 'gbs-1',
-      group_id: 'g-1',
-      payment_type: 'monthly',
-      amount: 450,
-      currency: 'EGP',
-      created_at: '2026-09-01T10:00:00Z',
-    },
-    {
-      id: 'gbs-2',
-      group_id: 'g-2',
-      payment_type: 'monthly',
-      amount: 450,
-      currency: 'EGP',
-      created_at: '2026-09-02T10:00:00Z',
-    },
-  ];
+  // No default prices: the admin sets the monthly price per group.
+  const billingSettings: GroupBillingSettings[] = [];
 
   const studentPayments: StudentPayment[] = [];
   const paymentTransactions: PaymentTransaction[] = [];
 
-  const teacherComp: TeacherCompensation[] = [
-    {
-      id: 'tc-1',
-      group_id: 'g-1',
-      teacher_id: 'tea-1',
-      compensation_type: 'per_session',
-      amount: 200,
-      currency: 'EGP',
-      created_at: '2026-09-01T10:00:00Z',
-    },
-    {
-      id: 'tc-2',
-      group_id: 'g-2',
-      teacher_id: 'tea-2',
-      compensation_type: 'per_session',
-      amount: 200,
-      currency: 'EGP',
-      created_at: '2026-09-02T10:00:00Z',
-    },
-  ];
+  const teacherComp: TeacherCompensation[] = [];
 
   const teacherEarnings: TeacherEarning[] = [];
 
@@ -222,6 +115,71 @@ function getInitialData() {
   };
 }
 
+
+/**
+ * Rewrite legacy local ids ('tea-1', 'g-1', 'stu-123456', ...) to the
+ * deterministic server UUIDs that syncId assigns, fixing every reference
+ * (foreign keys, currentUserId, nested exam questions). Runs once on load:
+ * afterwards the local store and Supabase speak the same ids, so groups,
+ * lessons and anything else created on this device actually reach the
+ * server, and hydration merges instead of duplicating.
+ */
+function migrateLegacyIds(state: any): boolean {
+  const map = new Map<string, string>();
+  const collect = (obj: any): void => {
+    if (!obj || typeof obj !== 'object') return;
+    if (Array.isArray(obj)) {
+      obj.forEach(collect);
+      return;
+    }
+    if (typeof obj.id === 'string' && obj.id && !isUuid(obj.id) && !map.has(obj.id)) {
+      map.set(obj.id, syncId(obj.id));
+    }
+    for (const v of Object.values(obj)) {
+      if (v && typeof v === 'object') collect(v);
+    }
+  };
+  Object.values(state).forEach(collect);
+  if (
+    typeof state.currentUserId === 'string' &&
+    state.currentUserId &&
+    !isUuid(state.currentUserId) &&
+    !map.has(state.currentUserId)
+  ) {
+    map.set(state.currentUserId, syncId(state.currentUserId));
+  }
+  if (map.size === 0) return false;
+  rewriteIdRefs(state, map);
+  console.info(`[EduFlow] migrated ${map.size} legacy local ids to server UUIDs.`);
+  return true;
+}
+
+/** Rewrite every id/foreign-key reference in the state according to the map. */
+function rewriteIdRefs(state: any, map: Map<string, string>): void {
+  const rewrite = (obj: any): void => {
+    if (!obj || typeof obj !== 'object') return;
+    if (Array.isArray(obj)) {
+      obj.forEach(rewrite);
+      return;
+    }
+    for (const [k, v] of Object.entries(obj)) {
+      if (
+        typeof v === 'string' &&
+        (k === 'id' || k.endsWith('_id') || k.endsWith('_by') || k === 'assigned_to') &&
+        map.has(v)
+      ) {
+        (obj as any)[k] = map.get(v);
+      } else if (v && typeof v === 'object') {
+        rewrite(v);
+      }
+    }
+  };
+  Object.values(state).forEach(rewrite);
+  if (typeof state.currentUserId === 'string' && map.has(state.currentUserId)) {
+    state.currentUserId = map.get(state.currentUserId);
+  }
+}
+
 export type DatabaseState = ReturnType<typeof getInitialData>;
 
 class MockDatabaseService {
@@ -233,10 +191,20 @@ class MockDatabaseService {
 
   constructor() {
     this.state = this.loadState();
-    // Snapshot the local state so the first persist() after hydration does
-    // not re-push everything we already have.
-    this.syncSnapshot = snapshotOnly(this.state);
-    this.syncReady = true;
+    const migrated = migrateLegacyIds(this.state);
+    if (migrated) {
+      // First run after the id migration: push the whole local store once
+      // (upserts only, no deletes) so groups/lessons that only existed on
+      // this device land in Supabase, then keep normal write-through sync.
+      this.syncSnapshot = {};
+      this.syncReady = true;
+      this.persist();
+    } else {
+      // Snapshot the local state so the first persist() after hydration does
+      // not re-push everything we already have.
+      this.syncSnapshot = snapshotOnly(this.state);
+      this.syncReady = true;
+    }
     // Auto sync from live Supabase cloud database
     this.syncFromSupabase();
   }
@@ -250,19 +218,52 @@ class MockDatabaseService {
     try {
       const tables = await pullAll();
       const state: any = this.state;
+
+      // Claim existing server accounts: if a local profile's email already
+      // exists on the server under another id (e.g. the demo teacher أ. أحمد
+      // رضوان registered in an earlier round), adopt the server id everywhere
+      // instead of creating a duplicate (which the unique email + the
+      // profiles->auth.users constraints would reject anyway).
+      let claimed = 0;
+      {
+        const byEmail = new Map<string, string>();
+        for (const r of tables.profiles || []) {
+          if (r && r.email) byEmail.set(String(r.email).trim().toLowerCase(), r.id);
+        }
+        const remap = new Map<string, string>();
+        for (const p of state.profiles || []) {
+          const rid = p.email && byEmail.get(String(p.email).trim().toLowerCase());
+          if (rid && rid !== p.id) remap.set(p.id, rid);
+        }
+        if (remap.size > 0) {
+          rewriteIdRefs(state, remap);
+          // The claim can make two local rows share one server id (a local
+          // legacy row plus an already-hydrated remote row): keep the first.
+          for (const v of Object.values(state)) {
+            if (Array.isArray(v)) {
+              const seen = new Set<string>();
+              for (let i = v.length - 1; i >= 0; i--) {
+                const id = v[i] && v[i].id;
+                if (id && seen.has(id)) v.splice(i, 1);
+                else if (id) seen.add(id);
+              }
+            }
+          }
+          claimed = remap.size;
+        }
+      }
       const nameOf = (table: string) =>
         Object.entries({
           profiles: 'profiles', courses: 'courses', course_groups: 'groups',
           enrollments: 'enrollments', sessions: 'sessions', video_plays: 'videoPlays',
           exams: 'exams', exam_attempts: 'examAttempts', assignments: 'assignments',
           assignment_submissions: 'submissions', attendance: 'attendance',
-          student_payments: 'studentPayments', payment_transactions: 'paymentTransactions',
-          group_billing_settings: 'billingSettings', teacher_compensation: 'teacherComp',
+          teacher_compensation: 'teacherComp',
           teacher_earnings: 'teacherEarnings', complaints: 'complaints',
           notifications: 'notifications', course_materials: 'courseMaterials',
           student_notes: 'studentNotes', parent_student_links: 'parentLinks',
           ai_conversations: 'aiConversations', ai_messages: 'aiMessages',
-        }).find(([, t]) => t === table)?.[0];
+        }).find(([t]) => t === table)?.[1];
 
       let merged = 0;
       for (const [table, rows] of Object.entries(tables)) {
@@ -307,11 +308,13 @@ class MockDatabaseService {
       }
 
       this.decorate();
-      // Snapshot AFTER merge so hydrated rows are not pushed back.
-      this.syncSnapshot = snapshotOnly(this.state);
-      if (merged > 0) {
+      // Snapshot only what the server actually has: local rows the server is
+      // missing (e.g. a group or lesson created on this device) stay pending
+      // and the persist below pushes them up.
+      this.syncSnapshot = snapshotForServerRows(this.state, tables);
+      if (merged > 0 || claimed > 0) {
         this.persist();
-        console.info(`[Hydrate] merged ${merged} rows from Supabase.`);
+        console.info(`[Hydrate] merged ${merged} rows from Supabase${claimed ? `, claimed ${claimed} existing profiles by email` : ''}.`);
       }
     } catch (err) {
       console.info('[Hydrate] Supabase hydration note:', err);
@@ -346,10 +349,6 @@ class MockDatabaseService {
       const asg = assignmentInfo(sub.assignment_id);
       sub.assignment_title = sub.assignment_title || asg?.title;
       sub.max_score = sub.max_score ?? asg?.max_score;
-    }
-    for (const p of state.studentPayments) {
-      p.student_name = p.student_name || profileName(p.student_id);
-      p.group_name = p.group_name || groupName(p.group_id);
     }
     for (const n of state.studentNotes) {
       n.student_name = n.student_name || profileName(n.student_id);
@@ -386,9 +385,7 @@ class MockDatabaseService {
   private loadState(): DatabaseState {
     if (typeof window !== 'undefined') {
       try {
-        localStorage.removeItem('eduflow_db');
-        localStorage.removeItem('eduflow_db_v1');
-        localStorage.removeItem('eduflow_db_v2');
+        LEGACY_STORAGE_KEYS.forEach((k) => localStorage.removeItem(k));
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored) {
           const parsed = JSON.parse(stored);
@@ -423,9 +420,6 @@ class MockDatabaseService {
             parsed.parentLinks = parsed.parentLinks.filter(
               (l: any) => !legacyDummyIds.includes(l.student_id) && !legacyDummyIds.includes(l.parent_id)
             );
-          }
-          if (Array.isArray(parsed.studentPayments)) {
-            parsed.studentPayments = parsed.studentPayments.filter((p: any) => !legacyDummyIds.includes(p.student_id));
           }
 
           if (legacyDummyIds.includes(parsed.currentUserId)) {
@@ -541,7 +535,7 @@ class MockDatabaseService {
     }
 
     if (!profile) {
-      return { success: false, error: 'لم يتم العثور على حساب مطابق للبيانات المدخلة. يمكنك استخدام كود المعلم tea-1 أو admin@gmail.com أو teacher@gmail.com.' };
+      return { success: false, error: 'لم يتم العثور على حساب مطابق للبيانات المدخلة على هذا الجهاز.' };
     }
 
     // Friendly demo password verification: allow profile password, universal 123456, admin123, or teacher123
@@ -557,6 +551,152 @@ class MockDatabaseService {
     this.state.currentUserId = profile.id;
     this.persist();
     return { success: true, profile };
+  }
+
+  /**
+   * Round 11: remote login for staff accounts created by the admin.
+   * Teacher/assistant accounts live in Supabase (Auth + profiles), so login
+   * verifies against the server, then hydrates the profile into the local
+   * store. Called by the login page when the local lookup finds nothing.
+   */
+  async loginRemote(identifier: string, password?: string): Promise<{ success: boolean; profile?: Profile; error?: string }> {
+    const raw = (identifier || '').trim();
+    const cleanId = raw.toLowerCase();
+    if (!raw) return { success: false, error: 'يرجى إدخال البريد الإلكتروني أو رقم الهاتف' };
+    if (!password) {
+      return { success: false, error: 'الحساب ده بيتفتح من السيرفر، لازم تكتب كلمة المرور.' };
+    }
+    try {
+      const res = await supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .or(`email.ilike.${cleanId},phone.eq.${raw},id.eq.${raw}`)
+        .limit(5);
+      let rows: any[] = res.error ? [] : (res.data || []);
+      if (rows.length === 0) {
+        const byName = await supabaseAdmin.from('profiles').select('*').ilike('full_name', `%${raw}%`).limit(5);
+        rows = byName.error ? [] : (byName.data || []);
+      }
+      if (rows.length === 0) {
+        return { success: false, error: 'لم يتم العثور على حساب مطابق على السيرفر.' };
+      }
+      const row = rows[0];
+      const ver = await verifySupabasePassword(row.email, password);
+      if (!ver.success) {
+        return { success: false, error: 'كلمة المرور غير صحيحة.' };
+      }
+      const mapped = fromDb.profiles(row);
+      mapped.password = password;
+      const idx = this.state.profiles.findIndex((p) => p.id === mapped.id || (p.email && p.email.toLowerCase() === mapped.email.toLowerCase()));
+      if (idx >= 0) {
+        this.state.profiles[idx] = { ...this.state.profiles[idx], ...mapped };
+      } else {
+        this.state.profiles.push(mapped);
+      }
+      this.state.currentUserId = mapped.id;
+      this.persist();
+      return { success: true, profile: this.state.profiles.find((p) => p.id === mapped.id) || mapped };
+    } catch (err) {
+      console.warn('[RemoteLogin] failed:', err);
+      return { success: false, error: 'تعذر الاتصال بالسيرفر. تأكد من الإنترنت وحاول تاني.' };
+    }
+  }
+
+  /**
+   * Round 11: admin creates a teacher or assistant account. The account is
+   * created in Supabase Auth + profiles first (so it works from any device),
+   * then mirrored into the local store for instant use on this device.
+   */
+  async createStaffByAdmin(
+    data: { full_name: string; phone: string; email?: string; password: string; role: 'teacher' | 'assistant' },
+    adminId: string
+  ): Promise<{ success: boolean; message: string; profile?: Profile }> {
+    const name = (data.full_name || '').trim();
+    const phone = (data.phone || '').trim();
+    const password = (data.password || '').trim();
+    const roleLabel = data.role === 'teacher' ? 'المعلم' : 'المساعد';
+    if (!name) return { success: false, message: 'اكتب اسم ' + roleLabel + ' الأول' };
+    if (!phone) return { success: false, message: 'اكتب رقم هاتف ' + roleLabel };
+    if (password.length < 6) return { success: false, message: 'كلمة المرور لازم تكون 6 أحرف أو أرقام على الأقل' };
+
+    const emailInput = (data.email || '').trim().toLowerCase();
+    const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput);
+    const digits = phone.replace(/\D/g, '') || Date.now().toString();
+    const cleanEmail = validEmail ? emailInput : `${data.role}.${digits}@eduflow.edu`;
+
+    const dup = this.state.profiles.find(
+      (p) => (p.phone && p.phone.trim() === phone) || (p.email && p.email.toLowerCase() === cleanEmail)
+    );
+    if (dup) {
+      return { success: false, message: `في حساب موجود بنفس البيانات (${dup.full_name}). غيّر رقم الهاتف أو البريد.` };
+    }
+
+    const res = await createUserInSupabase({
+      full_name: name,
+      phone,
+      email: cleanEmail,
+      password,
+      role: data.role,
+    });
+    if (!res.success || !res.id) {
+      return {
+        success: false,
+        message: 'فشل إنشاء الحساب على السيرفر: ' + (res.error || 'خطأ غير معروف') + '. تأكد من الإنترنت وحاول تاني.',
+      };
+    }
+
+    // Every teacher gets their own workspace in Supabase (their own space:
+    // groups, students and lessons live under it). Best-effort: a failure
+    // here never blocks the account creation above.
+    if (data.role === 'teacher') {
+      try {
+        await supabaseAdmin.from('workspaces').insert({
+          id: newUuid(),
+          name: `${name} Workspace`,
+          slug: `ws-${res.id.replace(/-/g, '').slice(0, 12)}`,
+          owner_id: res.id,
+          status: 'active',
+        });
+      } catch (wsErr) {
+        console.warn('[StaffCreate] workspace note:', wsErr);
+      }
+    }
+
+    const profile: Profile = {
+      id: res.id,
+      full_name: name,
+      email: cleanEmail,
+      phone,
+      role: data.role,
+      avatar: data.role === 'teacher' ? '👨‍🏫' : '🧑‍💻',
+      password,
+      created_at: new Date().toISOString(),
+    };
+    const existingIdx = this.state.profiles.findIndex((p) => p.id === res.id);
+    if (existingIdx >= 0) {
+      this.state.profiles[existingIdx] = { ...this.state.profiles[existingIdx], ...profile };
+    } else {
+      this.state.profiles.push(profile);
+    }
+    // The row already exists on the server (created above); the write-through
+    // sync will upsert the same values once more, which is harmless.
+
+    callAuditWorkflow({
+      action: `${data.role}.created`,
+      entity_type: data.role,
+      entity_id: res.id,
+      actor_id: adminId,
+      actor_role: 'admin',
+      source: 'EduFlow Admin Portal',
+      details: { full_name: name, phone, email: cleanEmail },
+    }).catch(() => {});
+
+    this.persist();
+    return {
+      success: true,
+      message: `تم إنشاء حساب ${roleLabel} (${name}) على السيرفر ✅ يقدر يدخل بالبريد ${cleanEmail} أو رقم ${phone} وكلمة المرور اللي حددتها.`,
+      profile,
+    };
   }
 
   /**
@@ -868,7 +1008,6 @@ class MockDatabaseService {
     course_title?: string;
     teacher_name?: string;
     max_students?: number;
-    amount?: number;
   }): CourseGroup {
     const newId = newUuid();
     const newGroup: CourseGroup = {
@@ -887,15 +1026,6 @@ class MockDatabaseService {
       max_students: data.max_students || 30,
     };
     this.state.groups.push(newGroup);
-
-    this.state.billingSettings.push({
-      id: newUuid(),
-      group_id: newId,
-      payment_type: 'monthly',
-      amount: data.amount || 450,
-      currency: 'EGP',
-      created_at: new Date().toISOString(),
-    });
 
     this.state.teacherComp.push({
       id: newUuid(),
@@ -969,15 +1099,11 @@ class MockDatabaseService {
     return newSession;
   }
 
-  // Video Plays Enforcement (Max 3 plays allowed rule)
-  startSessionVideo(sessionId: string, studentId: string): {
-    allowed: boolean;
-    play_id?: string;
-    play_number: number;
-    remaining_plays: number;
-    reason?: string;
-  } {
-    // Check previous session exam passed rule
+  /**
+   * Prerequisite only: the previous lesson's exam must be passed.
+   * Price, unlock codes and the view limit are decided by the server (accessService.consumeView).
+   */
+  checkSessionPrereq(sessionId: string, studentId: string): { allowed: boolean; reason?: string } {
     const currentSession = this.state.sessions.find((s) => s.id === sessionId);
     if (currentSession && currentSession.session_number > 1) {
       const prevSession = this.state.sessions.find(
@@ -990,50 +1116,26 @@ class MockDatabaseService {
             (a) => a.exam_id === prevExam.id && a.student_id === studentId && a.passed
           );
           if (!passedAttempt) {
-            return {
-              allowed: false,
-              play_number: 0,
-              remaining_plays: 0,
-              reason: 'يجب عليك اجتياز امتحان الحصة السابقة أولاً بنجاح قبل مشاهدة هذه الحصة.',
-            };
+            return { allowed: false, reason: 'يجب عليك اجتياز امتحان الحصة السابقة أولاً بنجاح قبل مشاهدة هذه الحصة.' };
           }
         }
       }
     }
+    return { allowed: true };
+  }
 
-    const previousPlays = this.state.videoPlays.filter(
-      (vp) => vp.session_id === sessionId && vp.student_id === studentId
-    );
-
-    if (previousPlays.length >= 3) {
-      return {
-        allowed: false,
-        play_number: previousPlays.length,
-        remaining_plays: 0,
-        reason: 'تم استنفاد الحد الأقصى لمشاهدة فيديو هذه الحصة (3 مرات). تواصل مع الإدارة لطلب إعادة المحاولات.',
-      };
-    }
-
-    const newPlayNumber = previousPlays.length + 1;
-    const playId = newUuid();
-    const play: VideoPlay = {
-      id: playId,
+  /** Local report copy of a view the server already allowed (feeds the attendance / tracker screens). */
+  recordVideoPlay(sessionId: string, studentId: string): void {
+    const previous = this.state.videoPlays.filter((vp) => vp.session_id === sessionId && vp.student_id === studentId);
+    this.state.videoPlays.push({
+      id: newUuid(),
       session_id: sessionId,
       student_id: studentId,
       started_at: new Date().toISOString(),
-      play_number: newPlayNumber,
+      play_number: previous.length + 1,
       created_at: new Date().toISOString(),
-    };
-
-    this.state.videoPlays.push(play);
+    });
     this.persist();
-
-    return {
-      allowed: true,
-      play_id: playId,
-      play_number: newPlayNumber,
-      remaining_plays: Math.max(0, 3 - newPlayNumber),
-    };
   }
 
   getVideoPlays(sessionId: string, studentId: string): VideoPlay[] {
@@ -1363,212 +1465,6 @@ class MockDatabaseService {
   }
 
   // Payments & Invoices
-  getStudentPayments(studentId?: string): StudentPayment[] {
-    if (studentId) {
-      return this.state.studentPayments.filter((p) => p.student_id === studentId);
-    }
-    return [...this.state.studentPayments];
-  }
-
-  /**
-   * Generate this month's invoices for every active enrollment that has none yet
-   * (for students registered before invoicing existed). Skips existing ones, so it is safe to press twice.
-   * New invoices are mirrored to Supabase (only rows whose student/group exist there as UUIDs).
-   */
-  async generateInvoicesForActiveEnrollments(opts?: { periodLabel?: string; dueDate?: string }): Promise<{ created: number; skipped: number; synced: number; failedSync: number; noGroup: number; periodLabel: string }> {
-    const now = new Date();
-    const months = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
-    const periodLabel = opts?.periodLabel || `شهر ${months[now.getMonth()]} ${now.getFullYear()}`;
-    const cycleMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-    const due = new Date(now.getFullYear(), now.getMonth(), 28);
-    const dueDate = opts?.dueDate || `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`;
-
-    let created = 0;
-    let skipped = 0;
-    const toSync: StudentPayment[] = [];
-    for (const e of this.state.enrollments) {
-      if (e.status !== 'active') continue;
-      const student = this.state.profiles.find((p) => p.id === e.student_id && p.role === 'student');
-      if (!student) continue;
-      const exists = this.state.studentPayments.some(
-        (p) => p.student_id === e.student_id && p.group_id === e.group_id && p.period_label === periodLabel
-      );
-      if (exists) { skipped++; continue; }
-      const group = this.state.groups.find((g) => g.id === e.group_id);
-      const billing = this.state.billingSettings.find((b) => b.group_id === e.group_id);
-      const amount = billing ? Number(billing.amount) || 0 : 450;
-      const inv: StudentPayment = {
-        id: newUuid(),
-        student_id: e.student_id,
-        group_id: e.group_id,
-        amount,
-        currency: billing?.currency || 'EGP',
-        paid_amount: 0,
-        remaining_amount: amount,
-        amount_due: amount,
-        amount_paid: 0,
-        status: 'unpaid',
-        period_label: periodLabel,
-        cycle_month: cycleMonth,
-        due_date: dueDate,
-        created_at: new Date().toISOString(),
-        student_name: student.full_name,
-        group_name: group?.name,
-      };
-      this.state.studentPayments.push(inv);
-      toSync.push(inv);
-      created++;
-    }
-    if (created > 0) {
-      this.persist();
-      this.notify();
-    }
-
-    let synced = 0;
-    let failedSync = 0;
-    for (const inv of toSync) {
-      if (!(isUuid(inv.id) && isUuid(inv.student_id) && isUuid(inv.group_id))) { failedSync++; continue; }
-      try {
-        const res = await callPaymentsWorkflow('invoice.create', {
-          id: inv.id,
-          student_id: inv.student_id,
-          group_id: inv.group_id,
-          amount: inv.amount,
-          currency: inv.currency,
-          period_label: inv.period_label,
-          due_date: inv.due_date,
-        });
-        if (res.success && res.data && res.data.success) synced++;
-        else failedSync++;
-      } catch {
-        failedSync++;
-      }
-    }
-    const noGroup = this.state.profiles.filter(
-      (pr) => pr.role === 'student' && !this.state.enrollments.some((e) => e.student_id === pr.id && e.status === 'active')
-    ).length;
-    return { created, skipped, synced, failedSync, noGroup, periodLabel };
-  }
-
-  getPaymentTransactions(paymentId?: string): PaymentTransaction[] {
-    if (paymentId) {
-      return this.state.paymentTransactions.filter((pt) => pt.student_payment_id === paymentId);
-    }
-    return [...this.state.paymentTransactions];
-  }
-
-  async recordStudentPayment(paymentId: string, amount: number, method: 'cash' | 'instapay' | 'vodafone_cash' | 'bank_transfer' | 'other', recordedBy: string, notes?: string): Promise<{ success: boolean; message: string; on_server?: boolean }> {
-    const payment = this.state.studentPayments.find((p) => p.id === paymentId);
-    if (!payment) return { success: false, message: 'الفاتورة غير موجودة' };
-    if (payment.status === 'waived') return { success: false, message: 'لا يمكن تحصيل فاتورة معفاة' };
-    if (payment.status === 'paid') return { success: false, message: 'الفاتورة مسددة بالكامل بالفعل' };
-
-    const currentPaid = payment.paid_amount || 0;
-    const remaining = payment.amount - currentPaid;
-    if (amount > remaining) {
-      return { success: false, message: `المبلغ المدخل (${amount}) يتجاوز المتبقي (${remaining})` };
-    }
-
-    // 1) Server-first: the n8n Payments Hub validates and writes the transaction
-    //    in Supabase (same rules as the record_student_payment DB function).
-    let serverRes: any = null;
-    let serverRejected: string | null = null;
-    try {
-      const res = await callPaymentsWorkflow('payment.record', {
-        payment_id: paymentId,
-        amount,
-        payment_method: method,
-        recorded_by: isUuid(recordedBy) ? recordedBy : undefined,
-        notes,
-      });
-      if (res.success && res.data) {
-        if (res.data.success) serverRes = res.data;
-        else serverRejected = res.data.error || 'رفض السيرفر العملية';
-      }
-    } catch {
-      // n8n offline — fall back to local recording below.
-    }
-    if (serverRejected) return { success: false, message: serverRejected };
-
-    const newPaid = serverRes ? Number(serverRes.paid_amount) : currentPaid + amount;
-    const newStatus = (serverRes ? serverRes.status : newPaid >= payment.amount ? 'paid' : 'partially_paid') as StudentPayment['status'];
-    payment.paid_amount = newPaid;
-    payment.amount_paid = newPaid;
-    payment.remaining_amount = Math.max(0, payment.amount - newPaid);
-    payment.payment_method = method;
-    payment.recorded_by = recordedBy;
-    payment.notes = notes || payment.notes;
-    payment.status = newStatus;
-    if (newStatus === 'paid') {
-      payment.paid_at = new Date().toISOString();
-    }
-
-    // Add transaction record (server-written rows reuse the server id so the
-    // sync layer upserts the same row instead of duplicating it)
-    this.state.paymentTransactions.push({
-      id: (serverRes && serverRes.transaction_id) || newUuid(),
-      student_payment_id: paymentId,
-      amount,
-      payment_method: method,
-      paid_at: new Date().toISOString(),
-      recorded_by: recordedBy,
-      notes,
-      created_at: new Date().toISOString(),
-    });
-
-    // Notify Student
-    this.addNotification({
-      user_id: payment.student_id,
-      title: '💳 تم تسجيل سداد مالي',
-      message: `تم توثيق سداد مبلغ ${amount} ${payment.currency} عبر ${method}. الحالة الحالية: ${payment.status === 'paid' ? 'مسدد بالكامل' : 'مسدد جزئياً'}.`,
-      notification_type: 'payment',
-    });
-
-    this.persist();
-    return {
-      success: true,
-      message: serverRes ? 'تم تسجيل السداد على السيرفر ☁️' : 'تم تسجيل السداد محلياً 💻 (السيرفر غير متاح)',
-      on_server: !!serverRes,
-    };
-  }
-
-  async waiveStudentPayment(paymentId: string, reason: string, waivedBy: string): Promise<{ success: boolean; message: string; on_server?: boolean }> {
-    const payment = this.state.studentPayments.find((p) => p.id === paymentId);
-    if (!payment) return { success: false, message: 'الفاتورة غير موجودة' };
-    if (!reason || reason.trim().length === 0) return { success: false, message: 'سبب الإعفاء مطلوب إلزامياً' };
-
-    // Server-first waive (mirrors the admin_waive_student_payment DB function)
-    let serverDone = false;
-    let serverRejected: string | null = null;
-    try {
-      const res = await callPaymentsWorkflow('payment.waive', {
-        payment_id: paymentId,
-        reason: reason.trim(),
-        waived_by: isUuid(waivedBy) ? waivedBy : undefined,
-      });
-      if (res.success && res.data) {
-        if (res.data.success) serverDone = true;
-        else serverRejected = res.data.error || 'رفض السيرفر العملية';
-      }
-    } catch {
-      // n8n offline — fall back to local waiver below.
-    }
-    if (serverRejected) return { success: false, message: serverRejected };
-
-    payment.status = 'waived';
-    payment.waived_reason = reason.trim();
-    payment.waived_at = new Date().toISOString();
-    payment.waived_by = waivedBy;
-
-    this.persist();
-    return {
-      success: true,
-      message: serverDone ? 'تم إعفاء الفاتورة على السيرفر ☁️' : 'تم إعفاء الفاتورة محلياً 💻 (السيرفر غير متاح)',
-      on_server: serverDone,
-    };
-  }
-
-  // Teacher Earnings
   getTeacherEarnings(teacherId?: string): TeacherEarning[] {
     if (teacherId) {
       return this.state.teacherEarnings.filter((e) => e.teacher_id === teacherId);
@@ -1910,7 +1806,6 @@ class MockDatabaseService {
     this.state.examAttempts = this.state.examAttempts.filter((a) => a.student_id !== userId);
     this.state.submissions = this.state.submissions.filter((s) => s.student_id !== userId);
     this.state.attendance = this.state.attendance.filter((a) => a.student_id !== userId);
-    this.state.studentPayments = this.state.studentPayments.filter((p) => p.student_id !== userId);
     this.state.notifications = this.state.notifications.filter((n) => n.user_id !== userId);
     this.state.studentNotes = this.state.studentNotes.filter((n) => n.student_id !== userId);
     this.state.parentLinks = this.state.parentLinks.filter((l) => l.student_id !== userId && l.parent_id !== userId);
@@ -2078,7 +1973,7 @@ class MockDatabaseService {
     } else if (qLower.includes('امتحان') || qLower.includes('درجة') || qLower.includes('شهادة')) {
       reply = `جميع درجاتك وتقارير أدائك موثقة بشكل آلي في المنظومة، وتُرسل مباشرة لولي أمرك عبر بريده الإلكتروني بمجرد تسليم الاختبار. يمكنك حل الاختبارات المنشورة في صفحتك الرئيسية في أي وقت.`;
     } else {
-      reply = `مرحباً بك! أنا مساعد EduFlow الأكاديمي الذكي المربوط بمقرراتك وموادك الدراسية. يمكنك سؤالي عن أي مفهوم علمي، أو طلب تلخيص نقطة معينة، أو الاستفسار عن الواجبات والامتحانات القادمة.`;
+      reply = '⏳ المعلم الذكي بيجهز الإجابة...';
     }
 
     const assistantMsg: AiMessage = {
@@ -2174,40 +2069,6 @@ class MockDatabaseService {
         student_name: newStudent.full_name,
         group_name: group?.name,
       });
-
-      // Create initial billing invoice
-      const initialInvoice: StudentPayment = {
-        id: newUuid(),
-        student_id: newStudent.id,
-        group_id: data.group_id,
-        amount: 450,
-        currency: 'EGP',
-        paid_amount: 0,
-        remaining_amount: 450,
-        amount_due: 450,
-        amount_paid: 0,
-        status: 'unpaid',
-        period_label: 'شهر نوفمبر 2026',
-        cycle_month: '2026-11-01',
-        due_date: '2026-11-20',
-        created_at: new Date().toISOString(),
-        student_name: newStudent.full_name,
-        group_name: group?.name,
-      };
-      this.state.studentPayments.push(initialInvoice);
-
-      // Mirror the invoice to the server so payments can be recorded on it remotely
-      if (isUuid(initialInvoice.id) && isUuid(initialInvoice.student_id) && isUuid(initialInvoice.group_id)) {
-        callPaymentsWorkflow('invoice.create', {
-          id: initialInvoice.id,
-          student_id: initialInvoice.student_id,
-          group_id: initialInvoice.group_id,
-          amount: initialInvoice.amount,
-          currency: initialInvoice.currency,
-          period_label: initialInvoice.period_label,
-          due_date: initialInvoice.due_date,
-        }).catch(() => {});
-      }
     }
 
     // Add welcoming notification
@@ -2230,7 +2091,6 @@ class MockDatabaseService {
         newStudent.id = res.id;
         // Remap every local reference to the old temporary id.
         this.state.enrollments.forEach((e) => { if (e.student_id === oldId) e.student_id = res.id!; });
-        this.state.studentPayments.forEach((p) => { if (p.student_id === oldId) p.student_id = res.id!; });
         this.state.parentLinks.forEach((l) => { if (l.student_id === oldId) l.student_id = res.id!; });
         this.state.attendance.forEach((a) => { if (a.student_id === oldId) a.student_id = res.id!; });
         this.state.examAttempts.forEach((a) => { if (a.student_id === oldId) a.student_id = res.id!; });
@@ -2357,120 +2217,6 @@ class MockDatabaseService {
     });
 
     this.persist();
-  }
-
-  async recordPaymentVoucherByAssistant(data: {
-    student_payment_id: string;
-    amount: number;
-    payment_method: 'cash' | 'instapay' | 'vodafone_cash' | 'bank_transfer' | 'other';
-    reference_number?: string;
-    notes?: string;
-    assistant_name?: string;
-  }): Promise<{ success: boolean; message?: string; invoice?: StudentPayment; transaction?: PaymentTransaction }> {
-    const invoice = this.state.studentPayments.find((p) => p.id === data.student_payment_id);
-    if (!invoice) return { success: false };
-
-    const refNumber = data.reference_number || 'OP-' + Math.floor(100000 + Math.random() * 900000);
-
-    // 1) Server-first: the n8n Payments Hub records the voucher in Supabase.
-    let serverRes: any = null;
-    let serverRejected: string | null = null;
-    try {
-      const res = await callPaymentsWorkflow('payment.record', {
-        payment_id: invoice.id,
-        amount: data.amount,
-        payment_method: data.payment_method,
-        reference_number: refNumber,
-        recorder_name: data.assistant_name,
-        notes: data.notes,
-      });
-      if (res.success && res.data) {
-        if (res.data.success) serverRes = res.data;
-        else serverRejected = res.data.error || 'رفض السيرفر العملية';
-      }
-    } catch {
-      // n8n offline — fall back to local voucher below.
-    }
-    if (serverRejected) return { success: false, message: serverRejected };
-
-    let transaction: PaymentTransaction;
-    if (serverRes) {
-      transaction = {
-        id: serverRes.transaction_id || newUuid(),
-        student_payment_id: invoice.id,
-        amount: data.amount,
-        payment_method: data.payment_method,
-        reference_number: refNumber,
-        notes: (data.notes || '') + ` (رصد المنسق: ${data.assistant_name || 'أ. كريم نبيل'})`,
-        paid_at: new Date().toISOString(),
-        recorded_by: data.assistant_name || 'ast-1',
-        created_at: new Date().toISOString(),
-      };
-      this.state.paymentTransactions.push(transaction);
-
-      invoice.paid_amount = Number(serverRes.paid_amount);
-      invoice.amount_paid = invoice.paid_amount;
-      invoice.status = serverRes.status as StudentPayment['status'];
-      invoice.remaining_amount = Number(serverRes.remaining_amount);
-      if (serverRes.status === 'paid') invoice.paid_at = new Date().toISOString();
-    } else {
-      // 2) Fallback: local voucher (n8n offline)
-      transaction = {
-        id: newUuid(),
-        student_payment_id: invoice.id,
-        amount: data.amount,
-        payment_method: data.payment_method,
-        reference_number: refNumber,
-        notes: (data.notes || '') + ` (رصد المنسق: ${data.assistant_name || 'أ. كريم نبيل'})`,
-        paid_at: new Date().toISOString(),
-        recorded_by: data.assistant_name || 'ast-1',
-        created_at: new Date().toISOString(),
-      };
-
-      this.state.paymentTransactions.push(transaction);
-
-      invoice.paid_amount = (invoice.paid_amount || 0) + data.amount;
-      invoice.amount_paid = invoice.paid_amount;
-      const targetDue = invoice.amount || invoice.amount_due || 450;
-      if (invoice.paid_amount >= targetDue) {
-        invoice.status = 'paid';
-      } else if (invoice.paid_amount > 0) {
-        invoice.status = 'partially_paid';
-      }
-      invoice.remaining_amount = Math.max(0, targetDue - invoice.paid_amount);
-    }
-
-    const student = this.state.profiles.find((p) => p.id === invoice.student_id);
-
-    // Send notifications
-    const methodNames: Record<string, string> = {
-      cash: 'نقداً بالسنتر',
-      instapay: 'انستاباي Instapay',
-      vodafone_cash: 'فودافون كاش',
-      bank_transfer: 'تحويل بنكي',
-      other: 'سداد إلكتروني',
-    };
-
-    const notifMsg = `تم استلام وتأكيد سداد مبلغ ${data.amount} ج.م بطريقة (${methodNames[data.payment_method] || data.payment_method}) برقم إيصال ${transaction.reference_number}. تم تحديث حالة الفاتورة.`;
-
-    this.addNotification({
-      user_id: invoice.student_id,
-      title: 'سند قبض ودفع معتمد 🧾',
-      message: notifMsg,
-      type: 'success',
-    });
-
-    if (student?.parent_id) {
-      this.addNotification({
-        user_id: student.parent_id,
-        title: 'تأكيد استلام مصروفات دراسية 🧾',
-        message: `عزيزي ولي أمر الطالب (${student.full_name}): ${notifMsg}`,
-        type: 'success',
-      });
-    }
-
-    this.persist();
-    return { success: true, invoice, transaction };
   }
 
   resolveComplaintByAssistant(
@@ -2682,15 +2428,6 @@ class MockDatabaseService {
 
       const att = this.state.attendance.find((a) => a.session_id === targetSessionId && a.student_id === stu.id);
 
-      const inv = this.state.studentPayments.find((p) => p.student_id === stu.id && p.group_id === groupId) ||
-                  this.state.studentPayments.find((p) => p.student_id === stu.id);
-
-      const due = inv ? (inv.amount || inv.amount_due || 450) : 450;
-      const paid = inv ? (inv.paid_amount || inv.amount_paid || 0) : 0;
-      const rem = inv?.remaining_amount ?? Math.max(0, due - paid);
-      const payStatus = inv ? inv.status : 'unpaid';
-      const payMethod = inv?.payment_method || 'لم يسجل';
-
       return {
         student_id: stu.id,
         student_name: stu.full_name,
@@ -2709,11 +2446,6 @@ class MockDatabaseService {
         assignment_submitted: assignmentSubmitted,
         assignment_score: assignmentScore,
         attendance_status: att ? att.status : undefined,
-        amount_due: due,
-        amount_paid: paid,
-        remaining_amount: rem,
-        payment_status: payStatus,
-        payment_method: payMethod,
       };
     });
   }

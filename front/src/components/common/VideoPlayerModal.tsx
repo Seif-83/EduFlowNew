@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, AlertTriangle, CheckCircle, Video, ExternalLink } from 'lucide-react';
 import { Session } from '../../types/database';
+import { ModalPortal } from './ModalPortal';
 
 interface VideoPlayerModalProps {
   session: Session | null;
@@ -58,8 +59,8 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   const youtubeEmbedUrl = getYouTubeEmbedUrl(session.video_url);
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
-      <div className="bg-white rounded-3xl max-w-3xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
+    <ModalPortal className="bg-slate-900/80 backdrop-blur-md">
+      <div className="bg-white rounded-3xl max-w-3xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-3rem)] min-h-0">
         {/* Top Header */}
         <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white">
           <div className="flex items-center gap-3">
@@ -72,7 +73,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
               </h3>
               <div className="flex items-center gap-2 text-xs text-slate-300 mt-0.5">
                 <span className="bg-white/10 px-2 py-0.5 rounded text-[11px]">
-                  مشاهدة رقم {playNumber} من أصل 3
+                  مشاهدة رقم {playNumber} من أصل {playNumber + remainingPlays}
                 </span>
                 <span>•</span>
                 <span className="text-amber-300">
@@ -94,26 +95,43 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         <div className="bg-black relative aspect-video flex items-center justify-center">
           {youtubeEmbedUrl ? (
             <iframe
+              key={youtubeEmbedUrl}
               src={youtubeEmbedUrl}
               title={session.title}
               className="w-full h-full border-0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
               allowFullScreen
+              referrerPolicy="strict-origin-when-cross-origin"
             />
+          ) : session.video_url ? (
+            /* Not a YouTube link → open in new tab, show a placeholder */
+            <div className="flex flex-col items-center justify-center gap-4 p-6 text-center">
+              <div className="w-16 h-16 rounded-2xl bg-white/10 flex items-center justify-center">
+                <Video className="w-8 h-8 text-white/60" />
+              </div>
+              <div>
+                <p className="text-white font-bold text-sm mb-1">الفيديو متاح عبر الرابط الخارجي</p>
+                <p className="text-white/60 text-xs mb-4">يمكنك مشاهدته بالضغط على زر &quot;فتح الرابط&quot; أدناه</p>
+                <a
+                  href={session.video_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-colors"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  فتح الفيديو في تبويب جديد
+                </a>
+              </div>
+            </div>
           ) : (
-            <video
-              controls
-              autoPlay
-              className="w-full h-full object-contain"
-              src={session.video_url}
-            >
-              عذراً، متصفحك لا يدعم تشغيل الفيديو.
-            </video>
+            <div className="flex items-center justify-center text-white/40 text-sm">
+              لا يوجد فيديو لهذه الحصة
+            </div>
           )}
         </div>
 
         {/* Info & Footer */}
-        <div className="p-4 sm:p-6 bg-slate-50 flex-1 overflow-y-auto">
+        <div className="p-4 sm:p-6 bg-slate-50 flex-1 min-h-0 overflow-y-auto overscroll-contain">
           <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
             <h4 className="font-bold text-slate-900 text-sm">
               معلومات الحصة والتنبيهات الأكاديمية
@@ -144,7 +162,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
           <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-start gap-2.5">
             <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <div className="leading-relaxed">
-              <strong>سياسة المشاهدات المعتمدة:</strong> يُسمح لكل طالب بمشاهدة تسجيل الحصة حتى <strong>3 مرات كحد أقصى</strong> حرصاً على التركيز والالتزام، كما لا يمكنك فتح الحصة التالية إلا بعد اجتياز اختبار هذه الحصة بنجاح.
+              <strong>سياسة المشاهدات المعتمدة:</strong> لكل حصة <strong>عدد مشاهدات محدد</strong> بيحسبه السيرفر (المتبقي ظاهر فوق) حرصاً على التركيز والالتزام، كما لا يمكنك فتح الحصة التالية إلا بعد اجتياز اختبار هذه الحصة بنجاح.
             </div>
           </div>
         </div>
@@ -158,6 +176,6 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
           </button>
         </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 };

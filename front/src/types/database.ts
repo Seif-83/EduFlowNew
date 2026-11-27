@@ -115,12 +115,6 @@ export interface StudentFollowUpRecord {
   assignment_score?: number;
   // Attendance status
   attendance_status?: 'present' | 'absent' | 'late' | 'excused';
-  // Financial status (per-student lookup view)
-  amount_due: number;
-  amount_paid: number;
-  remaining_amount: number;
-  payment_status: 'paid' | 'partially_paid' | 'unpaid' | 'waived' | 'overdue';
-  payment_method?: string;
 }
 
 export interface Question {

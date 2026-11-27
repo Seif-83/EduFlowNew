@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Sparkles,
   BookOpen,
@@ -20,16 +20,18 @@ import {
   Award,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { Profile, Session, Exam, Assignment, StudentPayment, ExamAttempt } from '../../types/database';
+import { Profile, Session, Exam, Assignment, ExamAttempt } from '../../types/database';
 import { db } from '../../services/mockDatabase';
+import { fetchStudentCommerce, redeemCode, consumeView, currentPeriod } from '../../services/accessService';
 import { generateLessonContent } from '../../services/aiGenerator';
-import { askGeminiTutor } from '../../services/geminiService';
+import { askTutor } from '../../services/tutorService';
 import { sounds } from '../../services/soundEffects';
 import { sendN8nEvent } from '../../services/n8nService';
 import { Flashcard3D } from '../common/Flashcard3D';
 import { ExamSolverModal } from '../common/ExamSolverModal';
 import { VideoPlayerModal } from '../common/VideoPlayerModal';
 import { FloatingAiTutor } from '../common/FloatingAiTutor';
+import { ModalPortal } from '../common/ModalPortal';
 
 interface StudentPortalProps {
   currentStudent: Profile;
@@ -86,13 +88,52 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const assignedExams = db.getExamsByGrade(currentStudent.grade_level || 'الصف الثاني الإعدادي');
   const studentGroups = db.getGroupsForStudent(currentStudent.id);
   const currentGroupId = studentGroups[0]?.id;
-  const sessions = db.getSessions(currentGroupId);
+  const sessions = db.getSessions(currentGroupId).filter((s) => s.is_published !== false);
   const assignments = db.getAssignments(currentGroupId);
   const mySubmissions = db.getSubmissions(undefined, currentStudent.id);
   const attendanceRecords = db.getAttendance(undefined, currentStudent.id);
-  const payments = db.getStudentPayments(currentStudent.id);
   const myComplaints = db.getComplaints(currentStudent.id);
   const studentNotes = db.getStudentNotes(currentStudent.id);
+
+  // Prices, access, subscription and unlock codes come from the server.
+  const [commerce, setCommerce] = useState<Awaited<ReturnType<typeof fetchStudentCommerce>> | null>(null);
+  const [codeInput, setCodeInput] = useState('');
+  const [codeBusy, setCodeBusy] = useState(false);
+  const [codeMsg, setCodeMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const groupIdsKey = studentGroups.map((g) => g.id).join(',');
+  const refreshCommerce = useCallback(async () => {
+    setCommerce(await fetchStudentCommerce(currentStudent.id, groupIdsKey ? groupIdsKey.split(',') : []));
+  }, [currentStudent.id, groupIdsKey]);
+  useEffect(() => {
+    refreshCommerce();
+  }, [refreshCommerce, activeTab]);
+  const period = currentPeriod();
+  const hasSubscription = (groupId: string) =>
+    (commerce?.subscriptions || []).some((x) => x.group_id === groupId && x.period === period);
+  const lessonInfo = (sessionId: string) => {
+    const lesson = commerce?.lessons.find((l) => l.id === sessionId);
+    const access = commerce?.access.find((a) => a.session_id === sessionId);
+    const price = lesson?.price ? Number(lesson.price) : 0;
+    const subscribed = lesson ? hasSubscription(lesson.group_id) : false;
+    const locked = !!lesson && !access && price > 0 && !subscribed;
+    const remaining = access ? Math.max(0, access.view_limit - access.views_used) : 3;
+    const limit = access ? access.view_limit : 3;
+    return { loaded: !!lesson, price, locked, access, remaining, limit };
+  };
+  const handleRedeem = async () => {
+    if (!codeInput.trim() || codeBusy) return;
+    setCodeBusy(true);
+    try {
+      const res = await redeemCode(currentStudent.id, codeInput.trim());
+      setCodeMsg({ ok: !!res.success, text: res.message });
+      if (res.success) {
+        setCodeInput('');
+        await refreshCommerce();
+      }
+    } finally {
+      setCodeBusy(false);
+    }
+  };
 
   // Attendance stats
   const presentCount = attendanceRecords.filter((a) => a.status === 'present').length;
@@ -154,17 +195,27 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   };
 
   // Launch Video
-  const handleLaunchVideo = (session: Session) => {
-    const playResult = db.startSessionVideo(session.id, currentStudent.id);
-    if (!playResult.allowed) {
-      alert(playResult.reason || 'تعذر تشغيل الفيديو');
+  const handleLaunchVideo = async (session: Session) => {
+    const prereq = db.checkSessionPrereq(session.id, currentStudent.id);
+    if (!prereq.allowed) {
+      alert(prereq.reason || 'تعذر تشغيل الفيديو');
       return;
     }
+    // The server decides: price / subscription / code, and counts the view atomically.
+    const res = await consumeView(currentStudent.id, session.id);
+    if (!res.allowed) {
+      alert(res.reason || 'تعذر تشغيل الفيديو');
+      if (res.locked) setActiveTab('payments');
+      refreshCommerce();
+      return;
+    }
+    db.recordVideoPlay(session.id, currentStudent.id);
     setVideoPlayInfo({
-      playNumber: playResult.play_number,
-      remainingPlays: playResult.remaining_plays,
+      playNumber: res.views_used || 1,
+      remainingPlays: res.views_remaining ?? 0,
     });
     setActiveVideoSession(session);
+    refreshCommerce();
   };
 
   // Lesson Quiz choice
@@ -298,33 +349,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     db.sendAiMessage(currentStudent.id, query);
     setChatMessages([...db.getAiMessages(currentStudent.id)]);
 
-    // 1. Dispatch to n8n AI Tutor Agent
-    try {
-      const n8nRes = await sendN8nEvent('ai_tutor_chat', {
-        question: query,
-        grade: currentStudent.grade_level || 'المرحلة الإعدادية',
-        student_name: currentStudent.full_name,
-      });
-      const aiReply = n8nRes.data?.data?.reply || n8nRes.data?.reply;
-      if (n8nRes.success && aiReply) {
-        db.updateLastAiAssistantMessage(currentStudent.id, aiReply);
-        setChatMessages([...db.getAiMessages(currentStudent.id)]);
-        return;
-      }
-    } catch (err) {
-      console.info('n8n AI agent fallback:', err);
-    }
-
-    // 2. Direct Gemini fallback
-    try {
-      const geminiAnswer = await askGeminiTutor(query, currentStudent.grade_level || 'المرحلة الإعدادية');
-      if (geminiAnswer) {
-        db.updateLastAiAssistantMessage(currentStudent.id, geminiAnswer);
-        setChatMessages([...db.getAiMessages(currentStudent.id)]);
-      }
-    } catch {
-      // Local fallback in place
-    }
+    const r = await askTutor(currentStudent, query);
+    db.updateLastAiAssistantMessage(currentStudent.id, r.text);
+    setChatMessages([...db.getAiMessages(currentStudent.id)]);
   };
 
   const myExamAttempts = db.getExamAttempts(currentStudent.id);
@@ -470,7 +497,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
           { id: 'assignments', label: '📝 الواجبات والأنشطة', icon: FileText },
           { id: 'attendance', label: '📊 سجل الحضور والغياب', icon: CalendarCheck },
           { id: 'generator', label: '⚡ المولد الذكي والبطاقات 3D', icon: Sparkles },
-          { id: 'payments', label: '💳 المصروفات والاشتراكات', icon: CreditCard },
+          { id: 'payments', label: '🔑 فتح الحصص والأسعار', icon: CreditCard },
           { id: 'complaints', label: '📩 الشكاوى والمقترحات', icon: LifeBuoy },
         ].map((tab) => {
           const TabIcon = tab.icon;
@@ -750,7 +777,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
           {/* AI Loading Modal Overlay */}
           {isGenerating && (
-            <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4">
+            <ModalPortal className="bg-slate-900/80 backdrop-blur-md">
               <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 text-center shadow-2xl border border-slate-200">
                 <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-gradient-to-tr from-blue-600 via-indigo-500 to-emerald-400 flex items-center justify-center text-4xl shadow-lg shadow-blue-500/40 animate-spin">
                   🧠
@@ -801,7 +828,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                   })}
                 </div>
               </div>
-            </div>
+            </ModalPortal>
           )}
 
           {/* Generated Interactive Environment */}
@@ -1014,7 +1041,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
               🎬 جدول الحصص والتسجيلات التعليمية
             </h3>
             <p className="text-xs text-slate-500 leading-relaxed mb-6">
-              يتاح لكل طالب <strong>3 مشاهدات كحد أقصى</strong> لكل حصة، ويشترط اجتياز اختبار الحصة السابقة أولاً.
+              الحصة المدفوعة بتتفتح بالدفع للمدرس أو بكود (من تاب "فتح الحصص والأسعار")، ولها <strong>عدد مشاهدات محدد</strong>، ويشترط اجتياز اختبار الحصة السابقة أولاً.
             </p>
 
             <div className="space-y-4">
@@ -1026,9 +1053,8 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 </div>
               ) : (
                 sessions.map((sess) => {
-                const plays = db.getVideoPlays(sess.id, currentStudent.id);
-                const playsCount = plays.length;
-                const remaining = Math.max(0, 3 - playsCount);
+                const info = lessonInfo(sess.id);
+                const remaining = info.remaining;
 
                 return (
                   <div
@@ -1042,12 +1068,18 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         </span>
                         <span
                           className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
-                            remaining > 0
+                            info.locked
+                              ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                              : remaining > 0
                               ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                               : 'bg-red-50 text-red-700 border border-red-200'
                           }`}
                         >
-                          {remaining > 0 ? `متبقي ${remaining} من 3 مشاهدات` : 'تم استنفاد المشاهدات'}
+                          {info.locked
+                            ? `🔒 مقفولة · ${info.price} ج.م`
+                            : remaining > 0
+                            ? `متبقي ${remaining} من ${info.limit} مشاهدات`
+                            : 'تم استنفاد المشاهدات'}
                         </span>
                       </div>
 
@@ -1062,11 +1094,11 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     <div className="flex items-center gap-2 w-full sm:w-auto">
                       <button
                         onClick={() => handleLaunchVideo(sess)}
-                        disabled={remaining === 0}
+                        disabled={!info.locked && remaining === 0}
                         className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:cursor-not-allowed"
                       >
                         <Play className="w-4 h-4 fill-white" />
-                        <span>مشاهدة الحصة</span>
+                        <span>{info.locked ? 'افتح الحصة' : 'مشاهدة الحصة'}</span>
                       </button>
 
                       {sess.materials_url && (
@@ -1311,73 +1343,98 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         </div>
       )}
 
-      {/* TAB 5: Payments & Invoices */}
+      {/* TAB 5: Unlock lessons: code, prices, subscription, bundles */}
       {activeTab === 'payments' && (
         <div className="space-y-6">
           <div className="bg-white border-2 border-slate-200 rounded-3xl p-6 shadow-sm">
-            <div className="flex items-center justify-between flex-wrap gap-2 mb-6">
-              <div>
-                <h3 className="text-lg font-black text-blue-950">
-                  💳 الفواتير والاشتراكات الشهرية
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  كشف حساب الطالب الموثق مع إمكانية السداد عبر إنستاباي وفودافون كاش
-                </p>
-              </div>
-
-              <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3 text-xs">
-                <span className="text-slate-600 block">طرق الدفع المعتمدة:</span>
-                <span className="font-bold text-blue-900">إنستاباي (Instapay) • فودافون كاش • نقدي</span>
-              </div>
+            <h3 className="text-lg font-black text-blue-950">🎟️ عندك كود فتح؟</h3>
+            <p className="text-xs text-slate-500 mt-0.5 mb-4">
+              الكود بيتستخدم مرة واحدة بس، وبيفتح الحصة ليك إنت لوحدك بعدد مشاهدات محدد.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={codeInput}
+                onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+                placeholder="مثال: AB12-CD34"
+                dir="ltr"
+                className="w-56 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono font-bold tracking-wider"
+              />
+              <button
+                type="button"
+                onClick={handleRedeem}
+                disabled={codeBusy || !codeInput.trim()}
+                className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold text-xs cursor-pointer"
+              >
+                {codeBusy ? '⏳ جاري التحقق...' : 'استخدام الكود'}
+              </button>
             </div>
+            {codeMsg && (
+              <p className={`mt-3 text-xs font-bold ${codeMsg.ok ? 'text-emerald-700' : 'text-red-600'}`}>{codeMsg.text}</p>
+            )}
+          </div>
 
-            <div className="overflow-x-auto">
+          <div className="bg-white border-2 border-slate-200 rounded-3xl p-6 shadow-sm">
+            <h3 className="text-lg font-black text-blue-950">💳 أسعار الحصص والاشتراك</h3>
+            <p className="text-xs text-slate-500 mt-0.5 mb-4">
+              ادفع للمدرس (نقدي أو إنستاباي أو فودافون كاش) وهو يسجل الدفع، فتتفتح الحصة عندك على طول.
+            </p>
+
+            {(commerce?.monthly || []).map((m) => {
+              const g = studentGroups.find((x) => x.id === m.group_id);
+              const sub = hasSubscription(m.group_id);
+              return (
+                <div key={m.group_id} className="mb-3 p-4 rounded-2xl bg-blue-50 border border-blue-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div>
+                    <div className="font-black text-blue-950">اشتراك شهري: {g?.name || 'المجموعة'}</div>
+                    <div className="text-slate-600">يفتح كل حصص الشهر. السعر {Number(m.amount)} ج.م</div>
+                  </div>
+                  <span className={`px-3 py-1 rounded-full font-bold ${sub ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-800 border border-amber-200'}`}>
+                    {sub ? `مشترك لشهر ${period} ✓` : 'غير مشترك الشهر ده'}
+                  </span>
+                </div>
+              );
+            })}
+
+            {(commerce?.bundles || []).map((b) => (
+              <div key={b.id} className="mb-3 p-4 rounded-2xl bg-indigo-50 border border-indigo-200 text-xs">
+                <div className="font-black text-indigo-950">باقة: {b.name} · {Number(b.price)} ج.م</div>
+                <div className="text-slate-600">
+                  تشمل: {b.session_ids.map((id) => commerce?.lessons.find((l) => l.id === id)).filter(Boolean).map((l) => `حصة ${l!.session_number}`).join('، ') || '—'}
+                </div>
+              </div>
+            ))}
+
+            <div className="overflow-x-auto mt-2">
               <table className="w-full text-right text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 text-slate-500 font-bold">
-                    <th className="pb-3">بيان الفاتورة</th>
-                    <th className="pb-3">المبلغ</th>
-                    <th className="pb-3">المسدد</th>
-                    <th className="pb-3">المتبقي</th>
-                    <th className="pb-3">تاريخ الاستحقاق</th>
+                    <th className="pb-3">الحصة</th>
+                    <th className="pb-3">السعر</th>
                     <th className="pb-3">الحالة</th>
-                    <th className="pb-3">طريقة الدفع</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {payments.map((p) => (
-                    <tr key={p.id} className="hover:bg-slate-50/60">
-                      <td className="py-4 font-bold text-slate-900">{p.period_label || 'اشتراك شهري'}</td>
-                      <td className="py-4 font-bold text-slate-900">{p.amount} {p.currency}</td>
-                      <td className="py-4 text-emerald-700 font-bold">{p.paid_amount || 0} {p.currency}</td>
-                      <td className="py-4 text-red-600 font-bold">{p.remaining_amount || 0} {p.currency}</td>
-                      <td className="py-4 text-slate-500">{p.due_date}</td>
-                      <td className="py-4">
-                        <span
-                          className={`px-3 py-1 rounded-full font-bold text-[11px] ${
-                            p.status === 'paid'
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : p.status === 'partially_paid'
-                              ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                              : p.status === 'overdue'
-                              ? 'bg-red-50 text-red-700 border border-red-200'
-                              : 'bg-slate-100 text-slate-700'
-                          }`}
-                        >
-                          {p.status === 'paid'
-                            ? 'مسدد بالكامل ✓'
-                            : p.status === 'partially_paid'
-                            ? 'مسدد جزئياً'
-                            : p.status === 'overdue'
-                            ? 'متأخر في السداد'
-                            : p.status === 'waived'
-                            ? 'معفى'
-                            : 'غير مسدد'}
-                        </span>
-                      </td>
-                      <td className="py-4 text-slate-500 font-semibold">{p.payment_method || 'لم يتم'}</td>
-                    </tr>
-                  ))}
+                  {(commerce?.lessons || []).map((l) => {
+                    const info = lessonInfo(l.id);
+                    return (
+                      <tr key={l.id}>
+                        <td className="py-3 font-bold text-slate-900">حصة {l.session_number}: {l.title}</td>
+                        <td className="py-3">{info.price > 0 ? `${info.price} ج.م` : 'مجانية'}</td>
+                        <td className="py-3">
+                          {info.access ? (
+                            <span className="text-emerald-700 font-bold">مفتوحة ✓ ({info.remaining} من {info.limit} مشاهدات)</span>
+                          ) : info.locked ? (
+                            <span className="text-amber-700 font-bold">🔒 مقفولة</span>
+                          ) : (
+                            <span className="text-slate-600">متاحة</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {(commerce?.lessons || []).length === 0 && (
+                    <tr><td colSpan={3} className="py-4 text-slate-400">لا توجد حصص منشورة.</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>

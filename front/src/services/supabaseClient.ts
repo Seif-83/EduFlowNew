@@ -188,6 +188,31 @@ export async function uploadMaterialFileToSupabase(file: File, teacherId: string
 }
 
 /**
+ * Round 11: verify a staff account's password against Supabase Auth.
+ * Used by remote login for teacher/assistant accounts created by the admin,
+ * so the password check happens on the server, not in the browser.
+ */
+export async function verifySupabasePassword(email: string, password: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const res = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+      method: 'POST',
+      headers: {
+        'apikey': supabaseAnonKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+    });
+    if (!res.ok) {
+      return { success: false, error: `HTTP ${res.status}` };
+    }
+    const data = await res.json();
+    return data?.access_token ? { success: true } : { success: false, error: 'no token' };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'network error' };
+  }
+}
+
+/**
  * Delete a user from Supabase Auth (admin API). The profiles row and all
  * linked data cascade in the database; tolerate "not found" errors.
  */

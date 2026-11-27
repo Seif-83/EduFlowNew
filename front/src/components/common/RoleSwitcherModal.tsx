@@ -2,6 +2,7 @@ import React from 'react';
 import { X, Check, Users, Shield, GraduationCap, UserCheck, Laptop } from 'lucide-react';
 import { Profile } from '../../types/database';
 import { db } from '../../services/mockDatabase';
+import { ModalPortal } from './ModalPortal';
 
 interface RoleSwitcherModalProps {
   currentProfile: Profile;
@@ -35,7 +36,7 @@ export const RoleSwitcherModal: React.FC<RoleSwitcherModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
+    <ModalPortal className="bg-slate-900/70 backdrop-blur-sm">
       <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[85vh] animate-in fade-in zoom-in-95 duration-200">
         <div className="p-5 border-b border-slate-100 flex items-center justify-between">
           <div>
@@ -117,6 +118,6 @@ export const RoleSwitcherModal: React.FC<RoleSwitcherModalProps> = ({
           💡 يمكنك التبديل بحرية في أي وقت لاختبار وظائف كل دور بالكامل.
         </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 };

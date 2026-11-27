@@ -22,6 +22,8 @@ import { db } from '../../services/mockDatabase';
 import { sendN8nEvent } from '../../services/n8nService';
 import { uploadMaterialFileToSupabase } from '../../services/supabaseClient';
 import { FloatingTeacherStudios } from './FloatingTeacherStudios';
+import { TeacherPricingPanel } from './TeacherPricingPanel';
+import { ModalPortal } from '../common/ModalPortal';
 
 interface TeacherPortalProps {
   currentTeacher: Profile;
@@ -30,11 +32,11 @@ interface TeacherPortalProps {
 export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) => {
   const [refreshKey, setRefreshKey] = useState(0);
   const [activeTab, setActiveTab] = useState<
-    'groups' | 'materials' | 'grading' | 'attendance' | 'earnings'
+    'groups' | 'materials' | 'grading' | 'attendance' | 'pricing' | 'earnings'
   >(() => {
     const saved = localStorage.getItem('eduflow_teacher_tab');
-    if (saved === 'groups' || saved === 'materials' || saved === 'grading' || saved === 'attendance' || saved === 'earnings') {
-      return saved as 'groups' | 'materials' | 'grading' | 'attendance' | 'earnings';
+    if (saved === 'groups' || saved === 'materials' || saved === 'grading' || saved === 'attendance' || saved === 'pricing' || saved === 'earnings') {
+      return saved as 'groups' | 'materials' | 'grading' | 'attendance' | 'pricing' | 'earnings';
     }
     return 'groups';
   });
@@ -144,7 +146,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
   const [newGroupStartDate, setNewGroupStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [newGroupEndDate, setNewGroupEndDate] = useState('2027-01-30');
   const [newGroupCapacity, setNewGroupCapacity] = useState(25);
-  const [newGroupMonthlyFee, setNewGroupMonthlyFee] = useState(450);
   const [groupSuccessMsg, setGroupSuccessMsg] = useState('');
 
   const handleCreateGroup = (e: React.FormEvent) => {
@@ -162,7 +163,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
       course_title: selectedCourse?.title || 'المنهج الدراسي',
       teacher_name: currentTeacher.full_name,
       max_students: Number(newGroupCapacity),
-      amount: Number(newGroupMonthlyFee),
     });
 
     setSelectedGroupId(created.id);
@@ -370,6 +370,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
           { id: 'materials', label: '📚 المذكرات الدراسية', icon: Upload },
           { id: 'grading', label: `✍️ تصحيح الواجبات (${pendingSubmissions.length})`, icon: FileCheck },
           { id: 'attendance', label: '📋 تسجيل الحضور والغياب', icon: CalendarCheck },
+          { id: 'pricing', label: '🏷️ الأسعار والأكواد', icon: DollarSign },
           { id: 'earnings', label: '💰 المستحقات والأرباح', icon: DollarSign },
         ].map((tab) => {
           const TabIcon = tab.icon;
@@ -959,6 +960,15 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
       )}
 
       {/* TAB 6: Teacher Earnings */}
+      {activeTab === 'pricing' && (
+        <TeacherPricingPanel
+          teacher={currentTeacher}
+          groupId={selectedGroupId}
+          groupName={groups.find((g) => g.id === selectedGroupId)?.name || ''}
+          students={studentProfiles}
+        />
+      )}
+
       {activeTab === 'earnings' && (
         <div className="space-y-6">
           <div className="bg-white border-2 border-slate-200 rounded-3xl p-6 shadow-sm">
@@ -1017,7 +1027,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
 
       {/* Modal: Add New Group Schedule */}
       {isAddGroupModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-200">
+        <ModalPortal className="bg-slate-950/60 backdrop-blur-xs">
           <div
             className="bg-white border-2 border-slate-200 rounded-3xl w-full max-w-lg p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto"
             dir="rtl"
@@ -1098,16 +1108,6 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
                     className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
                   />
                 </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700">قيمة الاشتراك الشهري (ج.م):</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={newGroupMonthlyFee}
-                    onChange={(e) => setNewGroupMonthlyFee(Number(e.target.value))}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
-                  />
-                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -1148,7 +1148,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
               </div>
             </form>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
       {/* Floating Action Buttons & Studios for Sessions and Exams */}

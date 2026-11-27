@@ -5,8 +5,42 @@ const GEMINI_API_KEY =
   (import.meta as any).env?.GEMINI_API_KEY ||
   '';
 
-const GEMINI_MODEL = 'gemini-2.5-flash-lite';
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+// Models are tried in order. Google retires old model names (the old 'gemini-2.5-flash-lite'
+// now returns 404 "no longer available"), so we fall through to the next one instead of failing.
+const GEMINI_MODELS: string[] = [
+  (import.meta as any).env?.VITE_GEMINI_MODEL || '',
+  'gemini-3.5-flash-lite',
+  'gemini-3.8-flash',
+].filter(Boolean);
+const endpointFor = (model: string) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+
+export const hasGeminiKey = () => !!GEMINI_API_KEY;
+
+let lastGeminiError = '';
+export const getLastGeminiError = () => lastGeminiError;
+
+/** POST to Gemini trying each model until one answers. Returns the parsed JSON or null. */
+async function callGemini(body: any): Promise<any | null> {
+  lastGeminiError = '';
+  for (const model of GEMINI_MODELS) {
+    try {
+      const response = await fetch(endpointFor(model), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (response.ok) return await response.json();
+      lastGeminiError = `${model}: HTTP ${response.status}`;
+      console.warn('Gemini API returned status', response.status, 'for model', model);
+      if (![404, 429, 500, 503].includes(response.status)) return null;
+    } catch (err) {
+      lastGeminiError = `${model}: network error`;
+      console.warn('Gemini network error:', err);
+    }
+  }
+  return null;
+}
 
 export interface GenerateLessonParams {
   lesson: string;
@@ -68,24 +102,14 @@ export async function generateLessonWithGemini(
 4. اللغة عربية فصحى تربوية سليمة وواضحة.`;
 
   try {
-    const response = await fetch(GEMINI_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          temperature: 0.3,
-        },
-      }),
+    const data = await callGemini({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0.3,
+      },
     });
-
-    if (!response.ok) {
-      console.warn('Gemini API returned status:', response.status);
-      return null;
-    }
-
-    const data = await response.json();
+    if (!data) return null;
     const candidate = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!candidate) return null;
 
@@ -107,38 +131,31 @@ export async function generateLessonWithGemini(
 }
 
 /**
- * Live AI tutor chat with Gemini for curriculum questions
+ * Live AI tutor chat with Gemini. `history` = earlier turns (oldest first) so follow-ups work.
  */
 export async function askGeminiTutor(
   studentQuestion: string,
-  gradeLevel: string = 'المرحلة الإعدادية'
+  gradeLevel: string = 'المرحلة الإعدادية',
+  history: { sender: 'user' | 'assistant'; message: string }[] = []
 ): Promise<string | null> {
   if (!GEMINI_API_KEY) return null;
 
-  const prompt = `أنت "المعلم الذكي" في منصة EduFlow التعليمية. تتحدث بلطف وتشجيع مع طالب في ${gradeLevel}.
-سؤال الطالب: "${studentQuestion}"
+  const system = `أنت "المعلم الذكي" في منصة EduFlow التعليمية. تتحدث بلطف وتشجيع مع طالب في ${gradeLevel}. أجب عن سؤال الطالب الحالي مباشرة وبالتحديد (لا تكرر ترحيباً عاماً)، بشرح علمي مبسط في 3-6 أسطر مع مثال من الحياة أو المنهج المصري، وباللغة العربية المبسطة، واختم بتشجيع قصير.`;
 
-أجب باختصار وترتيب (في 2-4 أسطر) مقدماً شرحاً علمياً مبسطاً، مع أمثلة من الحياة أو المنهج المصري، واختم بعبارة تشجيعية للطالب. باللغة العربية الفصحى.`;
+  const contents = [
+    ...history.slice(-8).map((m) => ({
+      role: m.sender === 'user' ? 'user' : 'model',
+      parts: [{ text: m.message }],
+    })),
+    { role: 'user', parts: [{ text: studentQuestion }] },
+  ];
 
-  try {
-    const response = await fetch(GEMINI_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.5,
-          maxOutputTokens: 500,
-        },
-      }),
-    });
-
-    if (!response.ok) return null;
-
-    const data = await response.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || null;
-  } catch (err) {
-    console.warn('Gemini tutor error:', err);
-    return null;
-  }
+  const data = await callGemini({
+    systemInstruction: { parts: [{ text: system }] },
+    contents,
+    generationConfig: { temperature: 0.5, maxOutputTokens: 1200 },
+  });
+  const parts = data?.candidates?.[0]?.content?.parts;
+  const text = Array.isArray(parts) ? parts.map((p: any) => p.text || '').join('').trim() : '';
+  return text || null;
 }

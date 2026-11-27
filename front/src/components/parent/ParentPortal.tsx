@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Profile } from '../../types/database';
 import { db } from '../../services/mockDatabase';
+import { fetchStudentCommerce } from '../../services/accessService';
 
 interface ParentPortalProps {
   currentParent: Profile;
@@ -117,7 +118,6 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ currentParent }) => 
   // Child data
   const childAttempts = db.getExamAttempts(activeChild?.id);
   const childAttendance = db.getAttendance(undefined, activeChild?.id);
-  const childPayments = db.getStudentPayments(activeChild?.id);
   const childNotes = db.getStudentNotes(activeChild?.id);
   const parentComplaints = db.getComplaints(currentParent.id);
 
@@ -130,9 +130,19 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ currentParent }) => 
   const lateCount = childAttendance.filter((a) => a.status === 'late').length;
   const attRate = childAttendance.length > 0 ? Math.round(((presentCount + lateCount) / childAttendance.length) * 100) : 100;
 
-  const pendingPaymentsAmount = childPayments
-    .filter((p) => p.status === 'unpaid' || p.status === 'partially_paid' || p.status === 'overdue')
-    .reduce((acc, p) => acc + (p.remaining_amount ?? p.amount), 0);
+  // Unlocked lessons and payments come from the server (teacher-priced model)
+  const [commerce, setCommerce] = useState<Awaited<ReturnType<typeof fetchStudentCommerce>> | null>(null);
+  const childGroupIds = activeChild ? db.getGroupsForStudent(activeChild.id).map((g) => g.id) : [];
+  const childGroupKey = childGroupIds.join(',');
+  useEffect(() => {
+    let alive = true;
+    if (activeChild) {
+      fetchStudentCommerce(activeChild.id, childGroupIds).then((r) => { if (alive) setCommerce(r); });
+    }
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChild?.id, childGroupKey]);
+  const unlockedCount = (commerce?.access || []).length;
 
   // Complaint Form
   const [subject, setSubject] = useState('');
@@ -362,13 +372,9 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ currentParent }) => 
             </div>
 
             <div className="bg-white/5 hover:bg-white/10 backdrop-blur-md rounded-2xl p-3.5 text-center border border-white/10 transition-all">
-              <span className="text-[11px] text-slate-300 block mb-1">المستحقات المعلقة</span>
-              <span className={`text-xl font-black ${pendingPaymentsAmount > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                {pendingPaymentsAmount > 0 ? `${pendingPaymentsAmount} EGP` : '0 EGP'}
-              </span>
-              <span className="text-[10px] text-slate-400 block mt-0.5">
-                {pendingPaymentsAmount > 0 ? 'مستحق السداد' : 'مسدد بالكامل ✓'}
-              </span>
+              <span className="text-[11px] text-slate-300 block mb-1">الحصص المفتوحة</span>
+              <span className="text-xl font-black text-emerald-400">{unlockedCount}</span>
+              <span className="text-[10px] text-slate-400 block mt-0.5">بالدفع أو بكود</span>
             </div>
           </div>
         </div>
@@ -549,62 +555,43 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ currentParent }) => 
         </div>
       )}
 
-      {/* TAB 3: Payments */}
+      {/* TAB 3: Payments & unlocked lessons */}
       {activeTab === 'payments' && (
         <div className="bg-white border-2 border-slate-200 rounded-3xl p-6 shadow-sm">
-          <h3 className="text-lg font-black text-slate-900 mb-1">
-            💳 المصروفات والمدفوعات للأبناء
-          </h3>
+          <h3 className="text-lg font-black text-slate-900 mb-1">💳 مدفوعات وحصص الابن</h3>
           <p className="text-xs text-slate-500 mb-6">
-            بيان الاشتراكات الشهرية والفواتير المستحقة والمسددة
+            الحصص بتتفتح بالدفع للمدرس (حصة، اشتراك شهري، أو باقة) أو بكود فتح. الدفع بيسجله المدرس.
           </p>
 
-          {childPayments.length === 0 ? (
-            <div className="p-8 text-center text-slate-500 bg-slate-50 rounded-2xl border border-dashed border-slate-300 space-y-2">
-              <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center justify-center mx-auto text-xl">
-                💳
-              </div>
-              <h4 className="font-bold text-slate-800 text-sm">لا توجد مستحقات مالية متأخرة</h4>
-              <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
-                حساب الطالب خالٍ من أي مستحقات معلقة حالياً، ويمكن إضافة وسداد اشتراكات الحصص الشهرية بسهولة.
-              </p>
+          {(commerce?.payments || []).length === 0 ? (
+            <div className="p-8 text-center text-slate-500 bg-slate-50 rounded-2xl border border-dashed border-slate-300 space-y-1">
+              <h4 className="font-bold text-slate-800 text-sm">لا توجد مدفوعات مسجلة</h4>
+              <p className="text-xs">لو الابن فتح حصة بكود، هتلاقيها في عدد الحصص المفتوحة فوق.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-right text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 text-slate-500 font-bold">
-                    <th className="pb-3">البيان</th>
-                    <th className="pb-3">القيمة</th>
-                    <th className="pb-3">المسدد</th>
-                    <th className="pb-3">المتبقي</th>
-                    <th className="pb-3">تاريخ الاستحقاق</th>
-                    <th className="pb-3">الحالة</th>
+                    <th className="pb-3">النوع</th>
+                    <th className="pb-3">التفاصيل</th>
+                    <th className="pb-3">المبلغ</th>
+                    <th className="pb-3">التاريخ</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {childPayments.map((p) => (
-                    <tr key={p.id} className="hover:bg-slate-50/50">
-                      <td className="py-3.5 font-bold text-slate-900">{p.period_label || 'اشتراك شهري'}</td>
-                      <td className="py-3.5 font-bold">{p.amount} {p.currency}</td>
-                      <td className="py-3.5 text-emerald-700 font-bold">{p.paid_amount || 0} {p.currency}</td>
-                      <td className="py-3.5 text-red-600 font-bold">{p.remaining_amount || 0} {p.currency}</td>
-                      <td className="py-3.5 text-slate-500">{p.due_date}</td>
-                      <td className="py-3.5">
-                        <span
-                          className={`px-2.5 py-0.5 rounded-full font-bold text-[11px] ${
-                            p.status === 'paid'
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : p.status === 'partially_paid'
-                              ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                              : 'bg-red-50 text-red-700 border border-red-200'
-                          }`}
-                        >
-                          {p.status === 'paid' ? 'مسدد بالكامل ✓' : p.status === 'partially_paid' ? 'مسدد جزئياً' : 'مستحق السداد'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {(commerce?.payments || []).map((p) => {
+                    const lesson = commerce?.lessons.find((l) => l.id === p.session_id);
+                    const bundle = commerce?.bundles.find((b) => b.id === p.bundle_id);
+                    return (
+                      <tr key={p.id} className="hover:bg-slate-50/50">
+                        <td className="py-3.5 font-bold text-slate-900">{p.kind === 'lesson' ? 'حصة' : p.kind === 'subscription' ? 'اشتراك شهري' : 'باقة'}</td>
+                        <td className="py-3.5 text-slate-600">{p.kind === 'lesson' ? (lesson ? `حصة ${lesson.session_number}: ${lesson.title}` : '—') : p.kind === 'subscription' ? `شهر ${p.period}` : bundle?.name || 'باقة'}</td>
+                        <td className="py-3.5 font-bold text-emerald-700">{p.amount} ج.م</td>
+                        <td className="py-3.5 text-slate-500">{new Date(p.created_at).toLocaleDateString('ar-EG')}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

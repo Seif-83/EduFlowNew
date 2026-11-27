@@ -82,20 +82,31 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
     setTimeout(() => {
       const res = db.login(identifier, password);
-      setIsLoading(false);
-      if (res.success && res.profile) {
-        // Verify role match if student/teacher tab
-        if (activeTab === 'student' && res.profile.role !== 'student') {
-          setLoginError('هذا الحساب ليس حساب طالب. يرجى اختيار التبويب المناسب لحسابك.');
-          return;
+      const applyResult = (r: { success: boolean; profile?: any; error?: string }) => {
+        setIsLoading(false);
+        if (r.success && r.profile) {
+          // Verify role match if student/teacher tab
+          if (activeTab === 'student' && r.profile.role !== 'student') {
+            setLoginError('هذا الحساب ليس حساب طالب. يرجى اختيار التبويب المناسب لحسابك.');
+            return;
+          }
+          if (activeTab === 'teacher' && r.profile.role === 'student') {
+            setLoginError('هذا الحساب مسجل كطالب. يرجى تسجيل الدخول من تبويب الطالب.');
+            return;
+          }
+          onLoginSuccess(r.profile);
+        } else {
+          setLoginError(r.error || 'فشل تسجيل الدخول. يرجى التحقق من صحة البيانات.');
         }
-        if (activeTab === 'teacher' && res.profile.role === 'student') {
-          setLoginError('هذا الحساب مسجل كطالب. يرجى تسجيل الدخول من تبويب الطالب.');
-          return;
-        }
-        onLoginSuccess(res.profile);
+      };
+      if (res.success) {
+        applyResult(res);
       } else {
-        setLoginError(res.error || 'فشل تسجيل الدخول. يرجى التحقق من صحة البيانات.');
+        // Not found locally: staff accounts created by the admin live in
+        // Supabase, so verify against the server (works from any device).
+        db.loginRemote(identifier, password)
+          .then(applyResult)
+          .catch(() => applyResult(res));
       }
     }, 250);
   };
@@ -468,64 +479,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs space-y-2">
                 <div className="flex items-center gap-1.5 font-bold text-slate-300">
                   <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-                  <span>بيانات الدخول المعتمدة (اضغط على أي حساب لتعبئة الحقول فوراً):</span>
+                  <span>بيانات الدخول المعتمدة:</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2">
                   <button
                     type="button"
                     onClick={() => {
-                      setIdentifier('tea-1');
-                      setPassword('123456');
-                    }}
-                    className="p-2.5 rounded-xl bg-purple-950/40 hover:bg-purple-900/40 border border-purple-800/50 hover:border-purple-500 text-right transition-all cursor-pointer"
-                  >
-                    <div className="font-bold text-purple-300 flex items-center gap-1.5">
-                      <BookOpen className="w-3.5 h-3.5" />
-                      <span>أ. أحمد رضوان (معلم)</span>
-                    </div>
-                    <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                      الكود: tea-1 | السر: 123456
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIdentifier('tea-2');
-                      setPassword('123456');
-                    }}
-                    className="p-2.5 rounded-xl bg-purple-950/40 hover:bg-purple-900/40 border border-purple-800/50 hover:border-purple-500 text-right transition-all cursor-pointer"
-                  >
-                    <div className="font-bold text-purple-300 flex items-center gap-1.5">
-                      <BookOpen className="w-3.5 h-3.5" />
-                      <span>د. مروة محمود (معلمة)</span>
-                    </div>
-                    <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                      الكود: tea-2 | السر: 123456
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIdentifier('ast-1');
-                      setPassword('123456');
-                    }}
-                    className="p-2.5 rounded-xl bg-teal-950/40 hover:bg-teal-900/40 border border-teal-800/50 hover:border-teal-500 text-right transition-all cursor-pointer"
-                  >
-                    <div className="font-bold text-teal-300 flex items-center gap-1.5">
-                      <Laptop className="w-3.5 h-3.5" />
-                      <span>أ. كريم نبيل (مساعد إداري)</span>
-                    </div>
-                    <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                      الكود: ast-1 | السر: 123456
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIdentifier('adm-1');
+                      setIdentifier('admin@gmail.com');
                       setPassword('123456');
                     }}
                     className="p-2.5 rounded-xl bg-indigo-950/40 hover:bg-indigo-900/40 border border-indigo-800/50 hover:border-indigo-500 text-right transition-all cursor-pointer"
@@ -535,10 +495,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                       <span>م. سيف عمرو (إدارة عامة)</span>
                     </div>
                     <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                      الكود: adm-1 | السر: 123456
+                      البريد: admin@gmail.com | السر: 123456
                     </div>
                   </button>
                 </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  المعلمون والمساعدون بيتعمل لهم حساب من لوحة الأدمن (تاب «إضافة معلم / مساعد») وبيدخلوا بالبريد أو رقم الهاتف وكلمة المرور اللي الأدمن حددها. الحساب بتتأكد من السيرفر مباشرة، فيشتغل من أي جهاز.
+                </p>
               </div>
 
               <div>
@@ -554,7 +517,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     required
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
-                    placeholder="مثال: tea-1 أو admin@gmail.com أو teacher@gmail.com"
+                    placeholder="مثال: admin@gmail.com أو البريد / رقم الهاتف اللي الأدمن سجله"
                     className="w-full pr-10 pl-4 py-2.5 rounded-xl bg-slate-950/80 border border-slate-700 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 font-mono"
                   />
                 </div>

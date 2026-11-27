@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Shield,
   Users,
@@ -21,9 +21,12 @@ import {
   FileText,
   Bell,
   Trash2,
+  UserPlus,
 } from 'lucide-react';
 import { Profile, StudentPayment } from '../../types/database';
 import { db } from '../../services/mockDatabase';
+import { fetchAdminMonitor } from '../../services/accessService';
+import { AdminCommerceMonitor } from './AdminCommerceMonitor';
 import {
   sendN8nEvent,
   callStudentWorkflow,
@@ -40,7 +43,7 @@ interface AdminPortalProps {
 }
 
 export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'billing' | 'teachers' | 'complaints' | 'automation'>(
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'addstaff' | 'billing' | 'teachers' | 'complaints' | 'automation'>(
     () => (localStorage.getItem('eduflow_admin_tab') as any) || 'overview'
   );
 
@@ -52,23 +55,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
   const [userSearch, setUserSearch] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState<string>('all');
 
-  // Payment Recording Modal / Form
-  const [recordPaymentId, setRecordPaymentId] = useState('');
-  const [payAmount, setPayAmount] = useState<number>(0);
-  const [payMethod, setPayMethod] = useState<'cash' | 'instapay' | 'vodafone_cash' | 'bank_transfer' | 'other'>('instapay');
-  const [payNotes, setPayNotes] = useState('');
-  const [paySuccessMsg, setPaySuccessMsg] = useState('');
-  const [paySubmitting, setPaySubmitting] = useState(false);
-  const [genInvoicesBusy, setGenInvoicesBusy] = useState(false);
-  const [genInvoicesMsg, setGenInvoicesMsg] = useState('');
-  const [, forceInvoiceRefresh] = useState(0);
-  const [waiveSubmitting, setWaiveSubmitting] = useState(false);
   const [earningActionId, setEarningActionId] = useState<string | null>(null);
-
-  // Waive Modal / Form
-  const [waivePaymentId, setWaivePaymentId] = useState('');
-  const [waiveReason, setWaiveReason] = useState('');
-  const [waiveSuccessMsg, setWaiveSuccessMsg] = useState('');
 
   // User management actions (delete / change role)
   const [userActionMsg, setUserActionMsg] = useState('');
@@ -84,6 +71,44 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
     setTimeout(() => setUserActionMsg(''), 3500);
   };
 
+  // Add teacher / assistant (Round 11): accounts are created in Supabase so
+  // staff can log in from any device.
+  const [staffName, setStaffName] = useState('');
+  const [staffPhone, setStaffPhone] = useState('');
+  const [staffEmail, setStaffEmail] = useState('');
+  const [staffPassword, setStaffPassword] = useState('');
+  const [staffRole, setStaffRole] = useState<'teacher' | 'assistant'>('teacher');
+  const [staffBusy, setStaffBusy] = useState(false);
+  const [staffMsg, setStaffMsg] = useState('');
+  const [staffMsgOk, setStaffMsgOk] = useState(true);
+  const [, forceStaffListRefresh] = useState(0);
+  const handleCreateStaff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (staffBusy) return;
+    setStaffBusy(true);
+    setStaffMsg('');
+    try {
+      const res = await db.createStaffByAdmin(
+        { full_name: staffName, phone: staffPhone, email: staffEmail, password: staffPassword, role: staffRole },
+        currentAdmin.id
+      );
+      setStaffMsg(res.message);
+      setStaffMsgOk(res.success);
+      if (res.success) {
+        setStaffName('');
+        setStaffPhone('');
+        setStaffEmail('');
+        setStaffPassword('');
+        forceStaffListRefresh((n) => n + 1);
+      }
+    } catch (err: any) {
+      setStaffMsg('حصل خطأ غير متوقع: ' + (err?.message || err));
+      setStaffMsgOk(false);
+    } finally {
+      setStaffBusy(false);
+    }
+  };
+
   // Complaint Resolution
   const [selectedComplaintId, setSelectedComplaintId] = useState('');
   const [adminResponseText, setAdminResponseText] = useState('');
@@ -96,7 +121,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
 
   // Database queries
   const allProfiles = db.getProfiles();
-  const allPayments = db.getStudentPayments();
   const allEarnings = db.getTeacherEarnings();
   const allComplaints = db.getComplaints();
   const allGroups = db.getGroups();
@@ -106,9 +130,22 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
   const studentsCount = allProfiles.filter((p) => p.role === 'student').length;
   const teachersCount = allProfiles.filter((p) => p.role === 'teacher').length;
   const parentsCount = allProfiles.filter((p) => p.role === 'parent').length;
-  const totalInvoiced = allPayments.reduce((acc, p) => acc + p.amount, 0);
-  const totalCollected = allPayments.reduce((acc, p) => acc + (p.paid_amount || 0), 0);
-  const totalRemaining = totalInvoiced - totalCollected;
+  // Read-only monitoring data (prices, codes and payments live on the server)
+  const [monitor, setMonitor] = useState<Awaited<ReturnType<typeof fetchAdminMonitor>> | null>(null);
+  const [monitorLoading, setMonitorLoading] = useState(false);
+  const refreshMonitor = useCallback(async () => {
+    setMonitorLoading(true);
+    try {
+      setMonitor(await fetchAdminMonitor());
+    } finally {
+      setMonitorLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    refreshMonitor();
+  }, [refreshMonitor, activeTab]);
+  const totalCollected = (monitor?.payments || []).reduce((acc, p) => acc + Number(p.amount), 0);
+  const codesUsed = (monitor?.codes || []).filter((c) => c.status === 'used').length;
 
   // Filtered users
   const filteredUsers = allProfiles.filter((p) => {
@@ -119,49 +156,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
     }
     return true;
   });
-
-  // Handle Record Payment
-  const handleRecordPayment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!recordPaymentId || payAmount <= 0 || paySubmitting) return;
-
-    setPaySubmitting(true);
-    try {
-      const res = await db.recordStudentPayment(recordPaymentId, payAmount, payMethod, currentAdmin.id, payNotes);
-      if (res.success) {
-        setPaySuccessMsg(res.message);
-        setRecordPaymentId('');
-        setPayAmount(0);
-        setPayNotes('');
-        setTimeout(() => setPaySuccessMsg(''), 4000);
-      } else {
-        alert(res.message);
-      }
-    } finally {
-      setPaySubmitting(false);
-    }
-  };
-
-  // Handle Waive Payment
-  const handleWaivePayment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!waivePaymentId || !waiveReason.trim() || waiveSubmitting) return;
-
-    setWaiveSubmitting(true);
-    try {
-      const res = await db.waiveStudentPayment(waivePaymentId, waiveReason, currentAdmin.id);
-      if (res.success) {
-        setWaiveSuccessMsg(res.message);
-        setWaivePaymentId('');
-        setWaiveReason('');
-        setTimeout(() => setWaiveSuccessMsg(''), 4000);
-      } else {
-        alert(res.message);
-      }
-    } finally {
-      setWaiveSubmitting(false);
-    }
-  };
 
   // Handle Resolve Complaint
   const handleResolveComplaint = (e: React.FormEvent) => {
@@ -357,7 +351,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
               </span>
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              التحكم الشامل في المستخدمين، الفوترة، مستحقات المعلمين، الشكاوى، وخطوط الأتمتة
+              التحكم في المستخدمين، مراقبة المدفوعات والأكواد، مستحقات المعلمين، الشكاوى، وخطوط الأتمتة
             </p>
           </div>
         </div>
@@ -396,7 +390,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
         </div>
 
         <div className="bg-white border-2 border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs">
-          <span className="text-xs font-bold text-slate-500 block mb-1">المحصل من المصروفات</span>
+          <span className="text-xs font-bold text-slate-500 block mb-1">مدفوعات الحصص المسجلة</span>
           <div className="flex items-baseline justify-between">
             <span className="text-2xl font-black text-emerald-600">{totalCollected} EGP</span>
             <CreditCard className="w-5 h-5 text-emerald-500/50" />
@@ -404,9 +398,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
         </div>
 
         <div className="bg-white border-2 border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs">
-          <span className="text-xs font-bold text-slate-500 block mb-1">المتبقي للتحصيل</span>
+          <span className="text-xs font-bold text-slate-500 block mb-1">أكواد الفتح المستخدمة</span>
           <div className="flex items-baseline justify-between">
-            <span className="text-2xl font-black text-red-600">{totalRemaining} EGP</span>
+            <span className="text-2xl font-black text-amber-600">{codesUsed}</span>
             <AlertTriangle className="w-5 h-5 text-red-500/50" />
           </div>
         </div>
@@ -417,7 +411,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
         {[
           { id: 'overview', label: '📊 ملخص المنظومة', icon: Shield },
           { id: 'users', label: '👥 إدارة المستخدمين والصلاحيات', icon: Users },
-          { id: 'billing', label: '💵 الفوترة وتحصيل المدفوعات', icon: CreditCard },
+          { id: 'addstaff', label: '➕ إضافة معلم / مساعد', icon: UserPlus },
+          { id: 'billing', label: '🔑 مراقبة المدفوعات والأكواد', icon: CreditCard },
           { id: 'teachers', label: '💼 صرف مستحقات المعلمين', icon: DollarSign },
           { id: 'complaints', label: `🎫 مكتب الشكاوى (${allComplaints.filter((c) => c.status !== 'resolved').length})`, icon: LifeBuoy },
           { id: 'automation', label: '⚙️ مركز الأتمتة و n8n', icon: Cpu },
@@ -479,10 +474,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
                 <span>RAG Service: توليد الفهارس المتجهة للمذكرات</span>
                 <span className="text-blue-700 font-bold">Gemini Flash 🟢</span>
-              </div>
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
-                <span>Billing: كشف المتأخرات وإنشاء الفواتير الآلية</span>
-                <span className="text-emerald-700 font-bold">مجدول يومياً 🟢</span>
               </div>
             </div>
           </div>
@@ -612,268 +603,129 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
         </div>
       )}
 
-      {/* TAB 3: Billing & Payments */}
-      {activeTab === 'billing' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-4">
-            <div className="bg-white border-2 border-slate-200 rounded-3xl p-6 shadow-sm">
-              <h3 className="text-lg font-black text-slate-900 mb-1">
-                💵 سجل الفواتير والمصروفات المدرسية
-              </h3>
-              <p className="text-xs text-slate-500 mb-6">
-                سجل فواتير الطلاب مع إمكانية تحصيل المبالغ أو إعفاء الحالات الإنسانية
-              </p>
-
-              <div className="flex flex-wrap items-center gap-3 mb-4">
+      {/* TAB 2b: Add teacher / assistant */}
+      {activeTab === 'addstaff' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white border-2 border-slate-200 rounded-3xl p-6 shadow-sm">
+            <h3 className="text-lg font-black text-slate-900">➕ إنشاء حساب معلم أو مساعد</h3>
+            <p className="text-xs text-slate-500 mt-1 mb-4">
+              الحساب بيتسجل على السيرفر (Supabase) مباشرة، فالموظف يقدر يدخل بيه من أي جهاز: البريد أو رقم الهاتف + كلمة المرور.
+            </p>
+            <form onSubmit={handleCreateStaff} className="space-y-3">
+              <div className="flex gap-2">
                 <button
                   type="button"
-                  disabled={genInvoicesBusy}
-                  onClick={async () => {
-                    setGenInvoicesBusy(true);
-                    setGenInvoicesMsg('');
-                    try {
-                      const r = await db.generateInvoicesForActiveEnrollments();
-                      forceInvoiceRefresh((n) => n + 1);
-                      const head =
-                        r.created === 0
-                          ? `لا توجد فواتير جديدة (${r.periodLabel}).`
-                          : `تم توليد ${r.created} فاتورة (${r.periodLabel}). ${r.synced > 0 ? `☁️ على السيرفر: ${r.synced}` : '💻 محلياً فقط'}${r.failedSync > 0 && r.synced === 0 ? ' (السيرفر غير متاح أو الطالب غير موجود عليه)' : ''}`;
-                      setGenInvoicesMsg(
-                        head + (r.noGroup > 0 ? ` ⚠️ ${r.noGroup} طالب غير مسجل في أي مجموعة فلن تُولَّد له فاتورة.` : '')
-                      );
-                    } finally {
-                      setGenInvoicesBusy(false);
-                    }
-                  }}
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold disabled:opacity-60"
+                  onClick={() => setStaffRole('teacher')}
+                  className={`flex-1 py-2.5 rounded-xl font-bold text-xs border-2 transition-all cursor-pointer ${
+                    staffRole === 'teacher'
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-white text-slate-600 border-slate-200 hover:border-emerald-300'
+                  }`}
                 >
-                  {genInvoicesBusy ? '⏳ جاري التوليد...' : '🧾 توليد فواتير الشهر للطلاب الحاليين'}
+                  👨‍🏫 معلم
                 </button>
-                {genInvoicesMsg && <span className="text-xs font-bold text-indigo-800">{genInvoicesMsg}</span>}
+                <button
+                  type="button"
+                  onClick={() => setStaffRole('assistant')}
+                  className={`flex-1 py-2.5 rounded-xl font-bold text-xs border-2 transition-all cursor-pointer ${
+                    staffRole === 'assistant'
+                      ? 'bg-indigo-600 text-white border-indigo-600'
+                      : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'
+                  }`}
+                >
+                  🧑‍💻 مساعد
+                </button>
               </div>
-
-              {paySuccessMsg && (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl mb-4">
-                  {paySuccessMsg}
+              <input
+                type="text"
+                value={staffName}
+                onChange={(e) => setStaffName(e.target.value)}
+                placeholder={staffRole === 'teacher' ? 'اسم المعلم بالكامل' : 'اسم المساعد بالكامل'}
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold"
+              />
+              <input
+                type="tel"
+                value={staffPhone}
+                onChange={(e) => setStaffPhone(e.target.value)}
+                placeholder="رقم الهاتف (يستخدمه في تسجيل الدخول)"
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold"
+              />
+              <input
+                type="email"
+                value={staffEmail}
+                onChange={(e) => setStaffEmail(e.target.value)}
+                placeholder="البريد الإلكتروني (اختياري - بيتولّد تلقائياً لو سيبته فاضي)"
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold"
+              />
+              <input
+                type="text"
+                value={staffPassword}
+                onChange={(e) => setStaffPassword(e.target.value)}
+                placeholder="كلمة المرور (6 أحرف أو أرقام على الأقل)"
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold"
+              />
+              <button
+                type="submit"
+                disabled={staffBusy}
+                className={`w-full py-3 rounded-xl font-black text-sm text-white transition-all ${
+                  staffBusy ? 'bg-slate-400 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-700 cursor-pointer'
+                }`}
+              >
+                {staffBusy ? '⏳ جاري الإنشاء على السيرفر...' : 'إنشاء الحساب على السيرفر ✅'}
+              </button>
+              {staffMsg && (
+                <div
+                  className={`p-3 rounded-xl text-xs font-bold border ${
+                    staffMsgOk
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                      : 'bg-red-50 border-red-200 text-red-700'
+                  }`}
+                >
+                  {staffMsg}
                 </div>
               )}
-              {waiveSuccessMsg && (
-                <div className="p-3 bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold rounded-xl mb-4">
-                  {waiveSuccessMsg}
-                </div>
-              )}
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-right text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-slate-500 font-bold">
-                      <th className="pb-3">الطالب</th>
-                      <th className="pb-3">البيان</th>
-                      <th className="pb-3">المبلغ</th>
-                      <th className="pb-3">المسدد</th>
-                      <th className="pb-3">المتبقي</th>
-                      <th className="pb-3">الحالة</th>
-                      <th className="pb-3">إجراء</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {allPayments.map((p) => (
-                      <tr key={p.id} className="hover:bg-slate-50/50">
-                        <td className="py-3.5 font-bold text-slate-900">{p.student_name}</td>
-                        <td className="py-3.5 text-slate-600">{p.period_label}</td>
-                        <td className="py-3.5 font-bold">{p.amount} {p.currency}</td>
-                        <td className="py-3.5 text-emerald-700 font-bold">{p.paid_amount || 0}</td>
-                        <td className="py-3.5 text-red-600 font-bold">{p.remaining_amount || 0}</td>
-                        <td className="py-3.5">
-                          <span
-                            className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
-                              p.status === 'paid'
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : p.status === 'partially_paid'
-                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                : p.status === 'overdue'
-                                ? 'bg-red-50 text-red-700 border border-red-200'
-                                : p.status === 'waived'
-                                ? 'bg-slate-100 text-slate-700 border border-slate-300'
-                                : 'bg-amber-50 text-amber-700 border border-amber-200'
-                            }`}
-                          >
-                            {p.status === 'paid'
-                              ? 'مسدد بالكامل'
-                              : p.status === 'partially_paid'
-                              ? 'مسدد جزئياً'
-                              : p.status === 'overdue'
-                              ? 'متأخر'
-                              : p.status === 'waived'
-                              ? 'معفى'
-                              : 'غير مسدد'}
-                          </span>
-                        </td>
-                        <td className="py-3.5">
-                          {p.status !== 'paid' && p.status !== 'waived' && (
-                            <div className="flex gap-1.5">
-                              <button
-                                onClick={() => {
-                                  setRecordPaymentId(p.id);
-                                  setPayAmount(p.remaining_amount || p.amount);
-                                }}
-                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-[11px]"
-                              >
-                                تحصيل
-                              </button>
-                              <button
-                                onClick={() => setWaivePaymentId(p.id)}
-                                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-[11px]"
-                              >
-                                إعفاء
-                              </button>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            </form>
           </div>
 
-          {/* Payment Actions Box */}
-          <div className="space-y-4">
-            {/* Record Payment Box */}
-            <div className="bg-white border-2 border-slate-200 rounded-3xl p-6 shadow-sm">
-              <h4 className="font-black text-slate-900 text-sm mb-1">
-                💳 تسجيل تحصيل دفعة مالية
-              </h4>
-              <p className="text-xs text-slate-500 mb-4">
-                توثيق المعاملة وإصدار إشعار للطالب
-              </p>
-
-              <form onSubmit={handleRecordPayment} className="space-y-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700">اختر الفاتورة:</label>
-                  <select
-                    required
-                    value={recordPaymentId}
-                    onChange={(e) => {
-                      const id = e.target.value;
-                      setRecordPaymentId(id);
-                      const f = allPayments.find((p) => p.id === id);
-                      if (f) setPayAmount(f.remaining_amount || f.amount);
-                    }}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
-                  >
-                    <option value="">-- اختر فاتورة مستحقة --</option>
-                    {allPayments
-                      .filter((p) => p.status !== 'paid' && p.status !== 'waived')
-                      .map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.student_name} - {p.period_label} ({p.remaining_amount || p.amount} EGP)
-                        </option>
-                      ))}
-                  </select>
+          <div className="bg-white border-2 border-slate-200 rounded-3xl p-6 shadow-sm space-y-3">
+            <h3 className="text-lg font-black text-slate-900">📋 المعلمون والمساعدون الحاليون</h3>
+            <p className="text-xs text-slate-500">بيانات الدخول لكل حساب موجود حالياً في المنظومة.</p>
+            <div className="space-y-2.5">
+              {allProfiles.filter((p) => p.role === 'teacher' || p.role === 'assistant').length === 0 && (
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-500 text-center">
+                  مفيش معلمين أو مساعدين لسه — أضف أول حساب من الفورم اللي على الشمال.
                 </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700">المبلغ المحصل:</label>
-                  <input
-                    type="number"
-                    required
-                    min={1}
-                    value={payAmount}
-                    onChange={(e) => setPayAmount(Number(e.target.value))}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-emerald-700"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700">طريقة الدفع:</label>
-                  <select
-                    value={payMethod}
-                    onChange={(e) => setPayMethod(e.target.value as typeof payMethod)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
-                  >
-                    <option value="instapay">إنستاباي (Instapay)</option>
-                    <option value="vodafone_cash">فودافون كاش (Vodafone Cash)</option>
-                    <option value="cash">نقدي بالخزينة (Cash)</option>
-                    <option value="bank_transfer">تحويل بنكي</option>
-                    <option value="other">أخرى</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700">ملاحظات التحصيل:</label>
-                  <input
-                    type="text"
-                    value={payNotes}
-                    onChange={(e) => setPayNotes(e.target.value)}
-                    placeholder="رقم العملية / كود الإيصال..."
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={paySubmitting}
-                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
-                >
-                  {paySubmitting ? 'جاري التوثيق على السيرفر... ⏳' : 'توثيق السداد'}
-                </button>
-              </form>
-            </div>
-
-            {/* Waive Payment Box */}
-            <div className="bg-white border-2 border-slate-200 rounded-3xl p-6 shadow-sm">
-              <h4 className="font-black text-slate-900 text-sm mb-1">
-                ⚖️ إعفاء فاتورة (Waiver)
-              </h4>
-              <p className="text-xs text-slate-500 mb-4">
-                يتطلب إدخال سبب رسمي ملزم وفق قواعد الحوكمة
-              </p>
-
-              <form onSubmit={handleWaivePayment} className="space-y-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700">اختر الفاتورة:</label>
-                  <select
-                    required
-                    value={waivePaymentId}
-                    onChange={(e) => setWaivePaymentId(e.target.value)}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
-                  >
-                    <option value="">-- اختر فاتورة للإعفاء --</option>
-                    {allPayments
-                      .filter((p) => p.status !== 'paid' && p.status !== 'waived')
-                      .map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.student_name} - {p.period_label}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-700">سبب الإعفاء (إلزامي):</label>
-                  <input
-                    type="text"
-                    required
-                    value={waiveReason}
-                    onChange={(e) => setWaiveReason(e.target.value)}
-                    placeholder="مثال: منحة تفوق دراسي / خصم أبناء عاملين..."
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={waiveSubmitting}
-                  className="w-full py-2.5 bg-slate-800 hover:bg-slate-900 disabled:opacity-60 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
-                >
-                  {waiveSubmitting ? 'جاري اعتماد الإعفاء على السيرفر... ⏳' : 'اعتماد الإعفاء الرسمي'}
-                </button>
-              </form>
+              )}
+              {allProfiles
+                .filter((p) => p.role === 'teacher' || p.role === 'assistant')
+                .map((p) => (
+                  <div key={p.id} className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-900">
+                        {p.avatar} {p.full_name}
+                      </span>
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full font-bold text-[11px] ${
+                          p.role === 'teacher'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                        }`}
+                      >
+                        {p.role === 'teacher' ? 'معلم' : 'مساعد'}
+                      </span>
+                    </div>
+                    <div className="text-slate-600">📧 {p.email}</div>
+                    <div className="text-slate-600">📱 {p.phone || 'غير مسجل'}</div>
+                  </div>
+                ))}
             </div>
           </div>
         </div>
+      )}
+
+      {/* TAB 3: Payments & unlock codes (read-only monitoring) */}
+      {activeTab === 'billing' && (
+        <AdminCommerceMonitor data={monitor} loading={monitorLoading} profiles={allProfiles} onRefresh={refreshMonitor} />
       )}
 
       {/* TAB 4: Teacher Earnings Approval */}

@@ -40,7 +40,7 @@ export default function App() {
     const unsubscribe = db.subscribe(() => {
       setTick((t) => t + 1);
       // Keep currentProfile synchronized with updated state
-      const currentId = currentProfile?.id || db.state.currentUserId;
+      const currentId = db.state.currentUserId || currentProfile?.id;
       if (currentId) {
         const updated = db.getProfileById(currentId);
         if (updated) {

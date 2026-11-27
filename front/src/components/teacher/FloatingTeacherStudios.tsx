@@ -79,7 +79,7 @@ export const FloatingTeacherStudios: React.FC<FloatingTeacherStudiosProps> = ({
       session_number: Number(sessionNumber),
       video_url:
         sessionVideoUrl.trim() ||
-        'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+        'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
       materials_url: 'https://example.com/materials.pdf',
       is_published: true,
     });
