@@ -505,6 +505,11 @@ async function runOps(ops: SyncOp[]): Promise<Set<string>> {
   return failed;
 }
 
+/** True when the last pull of this table failed (so an empty result means "unknown", not "deleted"). */
+export function pullFailed(table: string): boolean {
+  return failedOnce.has(table + ':pull');
+}
+
 function logSyncError(table: string, op: string, err: any) {
   const key = `${table}:${op}`;
   if (failedOnce.has(key)) return; // avoid console spam on repeated failures

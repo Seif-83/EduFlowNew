@@ -42,7 +42,15 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
   });
 
   const groups = db.getGroupsForTeacher(currentTeacher.id);
-  const [selectedGroupId, setSelectedGroupId] = useState(groups[0]?.id || 'g-1');
+  const [selectedGroupId, setSelectedGroupId] = useState(groups[0]?.id || '');
+
+  // Keep the selection valid: no group at all => '' (nothing is auto-created).
+  React.useEffect(() => {
+    if (!groups.some((g) => g.id === selectedGroupId)) {
+      setSelectedGroupId(groups[0]?.id || '');
+    }
+  }, [groups.map((g) => g.id).join(','), selectedGroupId]);
+
   const sessions = db.getSessions(selectedGroupId);
   const [selectedSessionId, setSelectedSessionId] = useState(sessions[0]?.id || '');
 
@@ -80,6 +88,24 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
   const [matMsg, setMatMsg] = useState('');
   const [matError, setMatError] = useState('');
   const myMaterials = db.getMaterialsByTeacher(currentTeacher.id);
+  const [confirmDeleteMatId, setConfirmDeleteMatId] = useState<string | null>(null);
+  const [deletingMatId, setDeletingMatId] = useState<string | null>(null);
+
+  const handleDeleteMaterial = async (id: string) => {
+    setDeletingMatId(id);
+    setMatMsg('');
+    setMatError('');
+    const res = await db.deleteCourseMaterial(id);
+    setDeletingMatId(null);
+    setConfirmDeleteMatId(null);
+    if (res.success) {
+      setMatMsg(res.message);
+      setRefreshKey((k) => k + 1);
+      setTimeout(() => setMatMsg(''), 5000);
+    } else {
+      setMatError(res.message);
+    }
+  };
 
   const handleUploadMaterial = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -141,8 +167,8 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
   const courses = db.getCourses();
   const [isAddGroupModalOpen, setIsAddGroupModalOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
-  const [newGroupCourseId, setNewGroupCourseId] = useState(courses[0]?.id || 'c-1');
-  const [newGroupScheduleTime, setNewGroupScheduleTime] = useState('السبت والثلاثاء - 06:00 مساءً');
+  const [newGroupCourseId, setNewGroupCourseId] = useState(courses[0]?.id || '');
+  const [newGroupScheduleTime, setNewGroupScheduleTime] = useState('');
   const [newGroupStartDate, setNewGroupStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [newGroupEndDate, setNewGroupEndDate] = useState('2027-01-30');
   const [newGroupCapacity, setNewGroupCapacity] = useState(25);
@@ -152,10 +178,20 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
     e.preventDefault();
     if (!newGroupName.trim()) return;
 
-    const selectedCourse = courses.find((c) => c.id === newGroupCourseId) || courses[0];
+    // No default course exists: if there is none, create one for this teacher
+    // (titled by their subject) so the group has a valid course in Supabase.
+    let selectedCourse = db.getCourses().find((c) => c.id === newGroupCourseId) || db.getCourses()[0];
+    if (!selectedCourse) {
+      selectedCourse = db.addCourse({
+        title: (currentTeacher.grade_level || newGroupName.trim() || 'المنهج الدراسي'),
+        description: '',
+        created_by: currentTeacher.id,
+        status: 'published',
+      });
+    }
     const created = db.createGroup({
       teacher_id: currentTeacher.id,
-      course_id: newGroupCourseId || 'c-1',
+      course_id: selectedCourse.id,
       name: newGroupName.trim(),
       schedule_time: newGroupScheduleTime.trim(),
       start_date: newGroupStartDate,
@@ -309,13 +345,18 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
           <select
             value={selectedGroupId}
             onChange={(e) => setSelectedGroupId(e.target.value)}
-            className="p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900"
+            disabled={groups.length === 0}
+            className="p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 min-w-[160px] disabled:text-slate-400 disabled:cursor-not-allowed"
           >
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.name}
-              </option>
-            ))}
+            {groups.length === 0 ? (
+              <option value="">لا توجد مجموعات بعد</option>
+            ) : (
+              groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))
+            )}
           </select>
           <button
             onClick={() => setIsAddGroupModalOpen(true)}
@@ -405,17 +446,32 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
                 ⏰
               </div>
               <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h3 className="font-black text-slate-900 text-sm sm:text-base">
-                    {groups.find((g) => g.id === selectedGroupId)?.name || groups[0]?.name}
-                  </h3>
-                  <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
-                    مجموعة نشطة 🟢
-                  </span>
-                </div>
-                <p className="text-xs text-emerald-900 font-semibold mt-1">
-                  الميعاد الدراسي الأسبوعي: <span className="font-black text-emerald-700 bg-white/80 px-2 py-0.5 rounded-md border border-emerald-200">{groups.find((g) => g.id === selectedGroupId)?.schedule_time || 'السبت والثلاثاء - 06:00 مساءً'}</span> • الطلاب المسجلين: {studentProfiles.length}
-                </p>
+                {(() => {
+                  const activeGroup = groups.find((g) => g.id === selectedGroupId);
+                  if (!activeGroup) {
+                    return (
+                      <>
+                        <h3 className="font-black text-slate-900 text-sm sm:text-base">لا توجد مجموعات بعد</h3>
+                        <p className="text-xs text-emerald-900 font-semibold mt-1">
+                          أضف مجموعتك الأولى وحدد ميعاد الحصص بنفسك من زرار "مجموعة وميعاد جديد".
+                        </p>
+                      </>
+                    );
+                  }
+                  return (
+                    <>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-black text-slate-900 text-sm sm:text-base">{activeGroup.name}</h3>
+                        <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
+                          مجموعة نشطة 🟢
+                        </span>
+                      </div>
+                      <p className="text-xs text-emerald-900 font-semibold mt-1">
+                        الميعاد الدراسي الأسبوعي: <span className="font-black text-emerald-700 bg-white/80 px-2 py-0.5 rounded-md border border-emerald-200">{activeGroup.schedule_time || 'لم يتحدد ميعاد'}</span> • الطلاب المسجلين: {studentProfiles.length}
+                      </p>
+                    </>
+                  );
+                })()}
               </div>
             </div>
 
@@ -586,6 +642,7 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
                           </div>
                         </div>
                       </div>
+                      <div className="flex items-center gap-2 flex-wrap">
                       <a
                         href={m.file_url}
                         target="_blank"
@@ -595,6 +652,37 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
                         <Download className="w-3.5 h-3.5" />
                         <span>فتح / تحميل</span>
                       </a>
+                      {confirmDeleteMatId === m.id ? (
+                        <div className="flex items-center gap-2 p-2 rounded-xl bg-red-50 border border-red-200">
+                          <span className="text-[11px] font-bold text-red-700">تمسح المذكرة نهائياً؟ مش هتظهر للطلاب.</span>
+                          <button
+                            type="button"
+                            disabled={deletingMatId === m.id}
+                            onClick={() => handleDeleteMaterial(m.id)}
+                            className="px-2.5 py-1 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white text-[11px] font-bold cursor-pointer"
+                          >
+                            {deletingMatId === m.id ? 'جاري الحذف...' : 'نعم، احذف'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={deletingMatId === m.id}
+                            onClick={() => setConfirmDeleteMatId(null)}
+                            className="px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-slate-700 text-[11px] font-bold cursor-pointer"
+                          >
+                            إلغاء
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteMatId(m.id)}
+                          className="px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>حذف</span>
+                        </button>
+                      )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1072,7 +1160,11 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
 
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700">المادة / الكورس:</label>
+                {courses.length === 0 && (
+                  <p className="text-[11px] text-slate-500">هيتم إنشاء المادة تلقائياً باسم مادتك عند حفظ المجموعة.</p>
+                )}
                 <select
+                  hidden={courses.length === 0}
                   value={newGroupCourseId}
                   onChange={(e) => setNewGroupCourseId(e.target.value)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold focus:bg-white focus:border-emerald-600 outline-hidden"
@@ -1152,13 +1244,15 @@ export const TeacherPortal: React.FC<TeacherPortalProps> = ({ currentTeacher }) 
       )}
 
       {/* Floating Action Buttons & Studios for Sessions and Exams */}
-      <FloatingTeacherStudios
-        currentTeacher={currentTeacher}
-        selectedGroupId={selectedGroupId}
-        groups={groups}
-        onSessionCreated={() => {}}
-        onExamCreated={() => {}}
-      />
+      {groups.length > 0 && (
+        <FloatingTeacherStudios
+          currentTeacher={currentTeacher}
+          selectedGroupId={selectedGroupId}
+          groups={groups}
+          onSessionCreated={() => {}}
+          onExamCreated={() => {}}
+        />
+      )}
     </div>
   );
 };

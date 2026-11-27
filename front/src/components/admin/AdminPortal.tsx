@@ -78,6 +78,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
   const [staffEmail, setStaffEmail] = useState('');
   const [staffPassword, setStaffPassword] = useState('');
   const [staffRole, setStaffRole] = useState<'teacher' | 'assistant'>('teacher');
+  const [staffSubject, setStaffSubject] = useState('');
   const [staffBusy, setStaffBusy] = useState(false);
   const [staffMsg, setStaffMsg] = useState('');
   const [staffMsgOk, setStaffMsgOk] = useState(true);
@@ -89,7 +90,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
     setStaffMsg('');
     try {
       const res = await db.createStaffByAdmin(
-        { full_name: staffName, phone: staffPhone, email: staffEmail, password: staffPassword, role: staffRole },
+        { full_name: staffName, phone: staffPhone, email: staffEmail, password: staffPassword, role: staffRole, subject: staffSubject },
         currentAdmin.id
       );
       setStaffMsg(res.message);
@@ -99,6 +100,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
         setStaffPhone('');
         setStaffEmail('');
         setStaffPassword('');
+        setStaffSubject('');
         forceStaffListRefresh((n) => n + 1);
       }
     } catch (err: any) {
@@ -657,6 +659,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
                 placeholder="البريد الإلكتروني (اختياري - بيتولّد تلقائياً لو سيبته فاضي)"
                 className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold"
               />
+              {staffRole === 'teacher' && (
+                <select
+                  value={staffSubject}
+                  onChange={(e) => setStaffSubject(e.target.value)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold"
+                >
+                  <option value="">اختار مادة المعلم...</option>
+                  {['لغة عربية', 'لغة إنجليزية', 'رياضيات', 'علوم', 'دراسات اجتماعية', 'لغة فرنسية', 'لغة ألمانية', 'فيزياء', 'كيمياء', 'أحياء', 'حاسب آلي', 'مادة أخرى'].map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              )}
               <input
                 type="text"
                 value={staffPassword}
@@ -716,6 +730,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ currentAdmin }) => {
                     </div>
                     <div className="text-slate-600">📧 {p.email}</div>
                     <div className="text-slate-600">📱 {p.phone || 'غير مسجل'}</div>
+                    {p.role === 'teacher' && p.grade_level && <div className="text-slate-600">📚 {p.grade_level}</div>}
                   </div>
                 ))}
             </div>

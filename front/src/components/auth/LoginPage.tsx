@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   GraduationCap,
   Users,
@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Profile, CourseGroup } from '../../types/database';
 import { db } from '../../services/mockDatabase';
+import { supabaseAdmin } from '../../services/supabaseClient';
 import { EduFlowLogo } from '../common/EduFlowLogo';
 
 interface LoginPageProps {
@@ -53,8 +54,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regGrade, setRegGrade] = useState('الصف الثاني الإعدادي');
-  const [regTeacherId, setRegTeacherId] = useState('tea-1');
-  const [regGroupId, setRegGroupId] = useState('g-1');
+  const [regTeacherId, setRegTeacherId] = useState('');
+  const [regGroupId, setRegGroupId] = useState('');
+  // Round 13: teachers shown on the student registration screen come ONLY from Supabase.
+  type TeacherOption = { id: string; name: string; subject: string; groups: { id: string; name: string }[] };
+  const [teacherOptions, setTeacherOptions] = useState<TeacherOption[]>([]);
+  const [teachersLoading, setTeachersLoading] = useState(false);
+  const [teachersError, setTeachersError] = useState('');
+  const [teachersReload, setTeachersReload] = useState(0);
   const [regSubject, setRegSubject] = useState('العلوم والفيزياء');
   const [regLinkedStudentPhone, setRegLinkedStudentPhone] = useState('');
   const [regSuccess, setRegSuccess] = useState('');
@@ -134,6 +141,44 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     }, 250);
   };
 
+  useEffect(() => {
+    if (activeTab !== 'register' || regRole !== 'student') return;
+    let cancelled = false;
+    setTeachersLoading(true);
+    setTeachersError('');
+    (async () => {
+      try {
+        const [tRes, gRes] = await Promise.all([
+          supabaseAdmin.from('profiles').select('id, full_name, grade_level').eq('role', 'teacher').order('created_at', { ascending: true }),
+          supabaseAdmin.from('course_groups').select('id, name, teacher_id, status').order('created_at', { ascending: true }),
+        ]);
+        if (tRes.error) throw tRes.error;
+        if (gRes.error) throw gRes.error;
+        const groups = (gRes.data || []).filter((g: any) => !g.status || g.status === 'active');
+        const opts: TeacherOption[] = (tRes.data || []).map((t: any) => ({
+          id: t.id,
+          name: t.full_name,
+          subject: t.grade_level || '',
+          groups: groups.filter((g: any) => g.teacher_id === t.id).map((g: any) => ({ id: g.id, name: g.name })),
+        }));
+        if (cancelled) return;
+        setTeacherOptions(opts);
+        // Drop a selection that no longer exists on the server.
+        setRegTeacherId((cur) => (opts.some((o) => o.id === cur) ? cur : ''));
+        setRegGroupId((cur) => (opts.some((o) => o.groups.some((g) => g.id === cur)) ? cur : ''));
+      } catch (e: any) {
+        if (cancelled) return;
+        setTeacherOptions([]);
+        setTeachersError(e?.message || 'تعذر تحميل قائمة المدرسين من السيرفر');
+      } finally {
+        if (!cancelled) setTeachersLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, regRole, teachersReload]);
+
   // Standalone Registration (Student, Teacher, Parent)
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -150,11 +195,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       return;
     }
 
+    if (regRole === 'student' && !regTeacherId) {
+      setLoginError('يرجى اختيار المعلم أولاً (لو القائمة فاضية، اطلب من الأدمن يضيف مدرس).');
+      return;
+    }
+
     setIsLoading(true);
     setLoginError('');
 
     try {
       const pwd = regPassword.trim() || '123456';
+      const chosenTeacher = teacherOptions.find((t) => t.id === regTeacherId);
       const newProfile = await db.registerUserStandalone({
         full_name: regName.trim(),
         phone: regPhone.trim(),
@@ -162,8 +213,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         password: pwd,
         role: regRole,
         grade_level: regGrade,
-        group_id: regGroupId,
-        teacher_id: regTeacherId,
+        group_id: regGroupId || undefined,
+        teacher_id: regRole === 'student' ? regTeacherId : undefined,
+        teacher_name: chosenTeacher ? chosenTeacher.name : undefined,
         subject: regSubject,
         student_phone_for_parent: regLinkedStudentPhone.trim(),
       });
@@ -740,51 +792,71 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                     اختر المعلم والمادة التي ترغب بدراستها *
                   </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRegTeacherId('tea-1');
-                        setRegGroupId('g-1');
-                      }}
-                      className={`p-3 rounded-2xl border text-right transition-all cursor-pointer flex items-center gap-3 ${
-                        regTeacherId === 'tea-1'
-                          ? 'bg-blue-950/70 border-blue-500 ring-2 ring-blue-500/30'
-                          : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
-                      }`}
-                    >
-                      <div className="w-10 h-10 rounded-xl bg-blue-600/20 text-blue-400 flex items-center justify-center text-xl shrink-0">
-                        👨‍🏫
+                  {teachersLoading && (
+                    <div className="text-xs text-slate-400 py-3 text-center">جاري تحميل المدرسين...</div>
+                  )}
+                  {!teachersLoading && teachersError && (
+                    <div className="text-xs text-red-300 bg-red-950/40 border border-red-900/50 rounded-xl p-3 flex items-center justify-between gap-2">
+                      <span>تعذر تحميل المدرسين: {teachersError}</span>
+                      <button type="button" onClick={() => setTeachersReload((n) => n + 1)} className="px-2 py-1 rounded-lg bg-slate-800 text-slate-200 cursor-pointer">إعادة المحاولة</button>
+                    </div>
+                  )}
+                  {!teachersLoading && !teachersError && teacherOptions.length === 0 && (
+                    <div className="text-xs text-slate-300 bg-slate-900/60 border border-slate-800 rounded-xl p-3 text-center">
+                      لا يوجد مدرسين متاحين حالياً. اطلب من الأدمن إضافة مدرس ثم أعد المحاولة.
+                      <div className="mt-2">
+                        <button type="button" onClick={() => setTeachersReload((n) => n + 1)} className="px-3 py-1 rounded-lg bg-slate-800 text-slate-200 cursor-pointer">تحديث</button>
                       </div>
-                      <div>
-                        <div className="font-bold text-xs sm:text-sm text-white">أ. أحمد رضوان</div>
-                        <div className="text-[11px] text-blue-400">مادة العلوم والفيزياء</div>
-                        <div className="text-[10px] text-slate-400 mt-0.5">مجموعة الأوائل</div>
+                    </div>
+                  )}
+                  {!teachersLoading && teacherOptions.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {teacherOptions.map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => {
+                            setRegTeacherId(t.id);
+                            setRegGroupId(t.groups[0]?.id || '');
+                          }}
+                          className={`p-3 rounded-2xl border text-right transition-all cursor-pointer flex items-center gap-3 ${
+                            regTeacherId === t.id
+                              ? 'bg-blue-950/70 border-blue-500 ring-2 ring-blue-500/30'
+                              : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="w-10 h-10 rounded-xl bg-blue-600/20 text-blue-400 flex items-center justify-center text-xl shrink-0">
+                            👨‍🏫
+                          </div>
+                          <div>
+                            <div className="font-bold text-xs sm:text-sm text-white">{t.name}</div>
+                            <div className="text-[11px] text-blue-400">{t.subject ? `مادة ${t.subject}` : 'المادة غير محددة'}</div>
+                            <div className="text-[10px] text-slate-400 mt-0.5">
+                              {t.groups.length > 0 ? t.groups.map((g) => g.name).join('، ') : 'لا توجد مجموعات بعد'}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {(() => {
+                    const sel = teacherOptions.find((t) => t.id === regTeacherId);
+                    if (!sel || sel.groups.length < 2) return null;
+                    return (
+                      <div className="mt-3">
+                        <label className="block text-xs font-semibold text-slate-300 mb-1.5">اختر المجموعة</label>
+                        <select
+                          value={regGroupId}
+                          onChange={(e) => setRegGroupId(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl bg-slate-950/80 border border-slate-700 text-white text-sm"
+                        >
+                          {sel.groups.map((g) => (
+                            <option key={g.id} value={g.id}>{g.name}</option>
+                          ))}
+                        </select>
                       </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRegTeacherId('tea-2');
-                        setRegGroupId('g-2');
-                      }}
-                      className={`p-3 rounded-2xl border text-right transition-all cursor-pointer flex items-center gap-3 ${
-                        regTeacherId === 'tea-2'
-                          ? 'bg-purple-950/70 border-purple-500 ring-2 ring-purple-500/30'
-                          : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
-                      }`}
-                    >
-                      <div className="w-10 h-10 rounded-xl bg-purple-600/20 text-purple-400 flex items-center justify-center text-xl shrink-0">
-                        👩‍🏫
-                      </div>
-                      <div>
-                        <div className="font-bold text-xs sm:text-sm text-white">د. مروة محمود</div>
-                        <div className="text-[11px] text-purple-400">مادة الرياضيات والجبر</div>
-                        <div className="text-[10px] text-slate-400 mt-0.5">مجموعة المتفوقين</div>
-                      </div>
-                    </button>
-                  </div>
+                    );
+                  })()}
                 </div>
               )}
 

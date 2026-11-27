@@ -41,6 +41,7 @@ export async function createUserInSupabase(userData: {
   email: string;
   password?: string;
   role?: 'student' | 'teacher' | 'parent' | 'assistant';
+  subject?: string;
 }): Promise<{ success: boolean; id?: string; error?: string }> {
   try {
     const role = userData.role || 'student';
@@ -71,6 +72,7 @@ export async function createUserInSupabase(userData: {
           full_name: userData.full_name.trim(),
           role,
           phone: cleanPhone,
+          ...(userData.subject ? { subject: userData.subject } : {}),
         },
       }),
     });
@@ -145,6 +147,8 @@ export async function createUserInSupabase(userData: {
         email: cleanEmail,
         phone: cleanPhone,
         role,
+        // Round 12: a teacher's subject is stored in profiles.grade_level (existing column, no SQL needed).
+        ...(userData.subject ? { grade_level: userData.subject } : {}),
       }),
     });
 
@@ -184,6 +188,27 @@ export async function uploadMaterialFileToSupabase(file: File, teacherId: string
     return { success: true, url: data.publicUrl };
   } catch (err: any) {
     return { success: false, error: err?.message || 'storage upload failed' };
+  }
+}
+
+/**
+ * Round 17: remove an uploaded file from the course-materials bucket, given its
+ * public URL. Returns ok:true also when the URL is not one of our bucket files
+ * (an external Drive/YouTube link): nothing to delete then.
+ */
+export async function deleteMaterialFileFromSupabase(url?: string | null): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+  try {
+    if (!url) return { ok: true, skipped: true };
+    const marker = '/storage/v1/object/public/course-materials/';
+    const i = url.indexOf(marker);
+    if (i < 0) return { ok: true, skipped: true };
+    const path = decodeURIComponent(url.slice(i + marker.length).split('?')[0]);
+    if (!path) return { ok: true, skipped: true };
+    const { error } = await supabaseAdmin.storage.from('course-materials').remove([path]);
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'storage delete failed' };
   }
 }
 

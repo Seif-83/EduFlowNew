@@ -27,14 +27,14 @@ import {
   StudentFollowUpRecord,
 } from '../types/database';
 import { sendN8nEvent, callStudentWorkflow, callAuditWorkflow, callNotificationsWorkflow, callMaterialIngestWorkflow, callExamsWorkflow, callPaymentsWorkflow } from './n8nService';
-import { supabase, supabaseAdmin, createUserInSupabase, createStudentInSupabase, resetSupabaseTestStudents, deleteAuthUserInSupabase, verifySupabasePassword } from './supabaseClient';
-import { diffAndPush, snapshotOnly, snapshotForServerRows, pullAll, fromDb, newUuid, isUuid, syncId } from './supabaseSync';
+import { supabase, supabaseAdmin, createUserInSupabase, createStudentInSupabase, resetSupabaseTestStudents, deleteAuthUserInSupabase, verifySupabasePassword, deleteMaterialFileFromSupabase } from './supabaseClient';
+import { diffAndPush, snapshotOnly, snapshotForServerRows, pullAll, pullFailed, fromDb, newUuid, isUuid, syncId } from './supabaseSync';
 
 // Round 11: versioned local reset. Bumping the storage key abandons the old
 // local store (v3 and older) entirely, so rows deleted from Supabase in the
 // clean-slate wipe can never be re-uploaded from a stale browser.
-const STORAGE_KEY = 'eduflow_db_v4';
-const LEGACY_STORAGE_KEYS = ['eduflow_db', 'eduflow_db_v1', 'eduflow_db_v2', 'eduflow_db_v3'];
+const STORAGE_KEY = 'eduflow_db_v5';
+const LEGACY_STORAGE_KEYS = ['eduflow_db', 'eduflow_db_v1', 'eduflow_db_v2', 'eduflow_db_v3', 'eduflow_db_v4'];
 
 // Seed Initial Database State
 // Round 11 (clean slate): the only built-in account is the admin. Teachers
@@ -265,6 +265,72 @@ class MockDatabaseService {
           ai_conversations: 'aiConversations', ai_messages: 'aiMessages',
         }).find(([t]) => t === table)?.[1];
 
+      // Exams deleted elsewhere (teacher deleted it on another device): drop the
+      // stale local copy instead of merging/re-pushing it, so students stop
+      // seeing it. Only when the exams pull really worked, the server answered
+      // for profiles too, and the exam is not brand new (a push may be in flight).
+      let prunedExams = 0;
+      if (
+        Array.isArray(tables.exams) &&
+        !pullFailed('exams') &&
+        !pullFailed('profiles') &&
+        (tables.profiles || []).length > 0 &&
+        Array.isArray(state.exams)
+      ) {
+        const serverExamIds = new Set(tables.exams.map((r: any) => r.id));
+        const goneIds = new Set<string>();
+        state.exams = state.exams.filter((ex: any) => {
+          const age = Date.now() - new Date(ex.created_at || 0).getTime();
+          const gone = isUuid(ex.id) && !serverExamIds.has(ex.id) && age > 5 * 60 * 1000;
+          if (gone) goneIds.add(ex.id);
+          return !gone;
+        });
+        if (goneIds.size > 0) {
+          prunedExams = goneIds.size;
+          if (Array.isArray(state.examAttempts)) {
+            state.examAttempts = state.examAttempts.filter((a: any) => !goneIds.has(a.exam_id));
+          }
+        }
+      }
+
+      // Round 17: same idea for lessons and study materials deleted on another
+      // device. A lesson is only dropped when its group exists on the server
+      // (otherwise its push may simply have failed and it must stay).
+      let prunedOther = 0;
+      if (
+        !pullFailed('profiles') &&
+        (tables.profiles || []).length > 0
+      ) {
+        const old = (x: any) => Date.now() - new Date(x.created_at || 0).getTime() > 5 * 60 * 1000;
+        if (Array.isArray(tables.sessions) && !pullFailed('sessions') && Array.isArray(tables.course_groups) && !pullFailed('course_groups') && Array.isArray(state.sessions)) {
+          const serverSessionIds = new Set(tables.sessions.map((r: any) => r.id));
+          const serverGroupIds = new Set(tables.course_groups.map((r: any) => r.id));
+          const goneS = new Set<string>();
+          state.sessions = state.sessions.filter((s: any) => {
+            const gone = isUuid(s.id) && !serverSessionIds.has(s.id) && serverGroupIds.has(s.group_id) && old(s);
+            if (gone) goneS.add(s.id);
+            return !gone;
+          });
+          if (goneS.size > 0) {
+            prunedOther += goneS.size;
+            const goneExam = new Set<string>((state.exams || []).filter((e: any) => goneS.has(e.session_id)).map((e: any) => e.id));
+            state.exams = (state.exams || []).filter((e: any) => !goneS.has(e.session_id));
+            state.examAttempts = (state.examAttempts || []).filter((a: any) => !goneExam.has(a.exam_id));
+            state.attendance = (state.attendance || []).filter((a: any) => !goneS.has(a.session_id));
+            state.videoPlays = (state.videoPlays || []).filter((v: any) => !goneS.has(v.session_id));
+            state.courseMaterials = (state.courseMaterials || []).filter((m: any) => !goneS.has(m.session_id));
+          }
+        }
+        if (Array.isArray(tables.course_materials) && !pullFailed('course_materials') && Array.isArray(state.courseMaterials)) {
+          const serverMatIds = new Set(tables.course_materials.map((r: any) => r.id));
+          const before = state.courseMaterials.length;
+          state.courseMaterials = state.courseMaterials.filter(
+            (m: any) => !(isUuid(m.id) && !serverMatIds.has(m.id) && old(m))
+          );
+          prunedOther += before - state.courseMaterials.length;
+        }
+      }
+
       let merged = 0;
       for (const [table, rows] of Object.entries(tables)) {
         const mapFn = (fromDb as any)[table];
@@ -312,7 +378,7 @@ class MockDatabaseService {
       // missing (e.g. a group or lesson created on this device) stay pending
       // and the persist below pushes them up.
       this.syncSnapshot = snapshotForServerRows(this.state, tables);
-      if (merged > 0 || claimed > 0) {
+      if (merged > 0 || claimed > 0 || prunedExams > 0 || prunedOther > 0) {
         this.persist();
         console.info(`[Hydrate] merged ${merged} rows from Supabase${claimed ? `, claimed ${claimed} existing profiles by email` : ''}.`);
       }
@@ -608,13 +674,15 @@ class MockDatabaseService {
    * then mirrored into the local store for instant use on this device.
    */
   async createStaffByAdmin(
-    data: { full_name: string; phone: string; email?: string; password: string; role: 'teacher' | 'assistant' },
+    data: { full_name: string; phone: string; email?: string; password: string; role: 'teacher' | 'assistant'; subject?: string },
     adminId: string
   ): Promise<{ success: boolean; message: string; profile?: Profile }> {
     const name = (data.full_name || '').trim();
     const phone = (data.phone || '').trim();
     const password = (data.password || '').trim();
     const roleLabel = data.role === 'teacher' ? 'المعلم' : 'المساعد';
+    const subject = data.role === 'teacher' ? (data.subject || '').trim() : '';
+    if (data.role === 'teacher' && !subject) return { success: false, message: 'اختار مادة المعلم الأول' };
     if (!name) return { success: false, message: 'اكتب اسم ' + roleLabel + ' الأول' };
     if (!phone) return { success: false, message: 'اكتب رقم هاتف ' + roleLabel };
     if (password.length < 6) return { success: false, message: 'كلمة المرور لازم تكون 6 أحرف أو أرقام على الأقل' };
@@ -637,6 +705,7 @@ class MockDatabaseService {
       email: cleanEmail,
       password,
       role: data.role,
+      subject: subject || undefined,
     });
     if (!res.success || !res.id) {
       return {
@@ -670,6 +739,7 @@ class MockDatabaseService {
       role: data.role,
       avatar: data.role === 'teacher' ? '👨‍🏫' : '🧑‍💻',
       password,
+      grade_level: subject || undefined,
       created_at: new Date().toISOString(),
     };
     const existingIdx = this.state.profiles.findIndex((p) => p.id === res.id);
@@ -688,13 +758,13 @@ class MockDatabaseService {
       actor_id: adminId,
       actor_role: 'admin',
       source: 'EduFlow Admin Portal',
-      details: { full_name: name, phone, email: cleanEmail },
+      details: { full_name: name, phone, email: cleanEmail, subject },
     }).catch(() => {});
 
     this.persist();
     return {
       success: true,
-      message: `تم إنشاء حساب ${roleLabel} (${name}) على السيرفر ✅ يقدر يدخل بالبريد ${cleanEmail} أو رقم ${phone} وكلمة المرور اللي حددتها.`,
+      message: `تم إنشاء حساب ${roleLabel} (${name})${subject ? ' - مادة ' + subject : ''} على السيرفر ✅ يقدر يدخل بالبريد ${cleanEmail} أو رقم ${phone} وكلمة المرور اللي حددتها.`,
       profile,
     };
   }
@@ -827,6 +897,7 @@ class MockDatabaseService {
     grade_level?: string;
     group_id?: string;
     teacher_id?: string;
+    teacher_name?: string;
     subject?: string;
     student_phone_for_parent?: string;
   }): Promise<Profile> {
@@ -857,13 +928,15 @@ class MockDatabaseService {
       console.warn('Supabase register error:', supaErr);
     }
 
-    const teacherId = data.teacher_id || (data.group_id === 'g-2' ? 'tea-2' : 'tea-1');
-    const teacher = this.state.profiles.find((p) => p.id === teacherId);
+    // Round 13: no hardcoded default teacher/group. The id comes from the Supabase-backed picker.
+    const teacherId = data.teacher_id || undefined;
+    const teacher = teacherId ? this.state.profiles.find((p) => p.id === teacherId) : undefined;
     let groupId = data.group_id;
-    if (role === 'student' && !groupId) {
+    if (role === 'student' && !groupId && teacherId) {
       const teacherGroup = this.state.groups.find((g) => g.teacher_id === teacherId);
-      groupId = teacherGroup?.id || 'g-1';
+      groupId = teacherGroup?.id;
     }
+    const enrollmentId = newUuid();
 
     const avatar = role === 'teacher' ? '👨‍🏫' : (role === 'parent' ? '👨‍👩‍👧' : '👨‍🎓');
 
@@ -877,7 +950,7 @@ class MockDatabaseService {
       role,
       avatar,
       teacher_id: role === 'student' ? teacherId : undefined,
-      teacher_name: role === 'student' ? (teacher?.full_name || 'أ. أحمد رضوان') : undefined,
+      teacher_name: role === 'student' ? (teacher?.full_name || data.teacher_name || undefined) : undefined,
       created_at: new Date().toISOString(),
     };
 
@@ -895,7 +968,7 @@ class MockDatabaseService {
     const group = (role === 'student' && groupId) ? this.state.groups.find((g) => g.id === groupId) : null;
     if (role === 'student' && groupId) {
       this.state.enrollments.push({
-        id: newUuid(),
+        id: enrollmentId,
         student_id: newId,
         group_id: groupId,
         enrolled_at: new Date().toISOString(),
@@ -903,6 +976,23 @@ class MockDatabaseService {
         student_name: profile.full_name,
         group_name: group?.name || 'المجموعة الدراسية',
       });
+    }
+
+    // Round 13: save the student -> teacher (and group) link to Supabase right away.
+    if (role === 'student' && teacherId) {
+      try {
+        const linkRes = await supabaseAdmin.from('profiles').update({ teacher_id: teacherId }).eq('id', newId);
+        if (linkRes.error) console.warn('Student teacher link note:', linkRes.error.message);
+        if (groupId) {
+          const enrRes = await supabaseAdmin.from('enrollments').upsert(
+            { id: enrollmentId, student_id: newId, group_id: groupId, status: 'active' },
+            { onConflict: 'id' }
+          );
+          if (enrRes.error) console.warn('Student enrollment link note:', enrRes.error.message);
+        }
+      } catch (linkErr) {
+        console.warn('Student link sync error:', linkErr);
+      }
     }
 
     // 2. Dispatch to n8n backend workflows
@@ -1012,10 +1102,10 @@ class MockDatabaseService {
     const newId = newUuid();
     const newGroup: CourseGroup = {
       id: newId,
-      course_id: data.course_id || 'c-1',
+      course_id: data.course_id,
       teacher_id: data.teacher_id,
       name: data.name,
-      schedule_time: data.schedule_time || 'السبت والثلاثاء - 06:00 مساءً',
+      schedule_time: data.schedule_time || '',
       start_date: data.start_date || new Date().toISOString().split('T')[0],
       end_date: data.end_date || '2027-01-30',
       status: 'active',
@@ -1172,6 +1262,111 @@ class MockDatabaseService {
     this.state.exams.push(newExam);
     this.persist();
     return newExam;
+  }
+
+  // Delete an exam for good: from Supabase first (questions, attempts and
+  // answers go with it through ON DELETE CASCADE), then from local state so
+  // students stop seeing it. If Supabase refuses, nothing is removed locally.
+  async deleteExam(examId: string): Promise<{ success: boolean; message: string }> {
+    const exam = this.state.exams.find((e) => e.id === examId);
+    if (!exam) return { success: false, message: 'الاختبار مش موجود.' };
+    if (isUuid(examId)) {
+      try {
+        const { error } = await supabaseAdmin.from('exams').delete().eq('id', syncId(examId));
+        if (error) {
+          return { success: false, message: `تعذر حذف الاختبار من Supabase: ${error.message}` };
+        }
+      } catch (err: any) {
+        return { success: false, message: `تعذر الاتصال بـ Supabase: ${err?.message || err}` };
+      }
+    }
+    this.state.exams = this.state.exams.filter((e) => e.id !== examId);
+    this.state.examAttempts = this.state.examAttempts.filter((a) => a.exam_id !== examId);
+    this.state.notifications = this.state.notifications.filter(
+      (n: any) => n.related_url !== `/exams/${examId}`
+    );
+    this.persist();
+    return { success: true, message: `تم حذف الاختبار "${exam.title}" نهائياً.` };
+  }
+
+  // Is this uploaded-file URL still used by another lesson or study material?
+  private fileUrlStillUsed(url: string | undefined, exceptSessionId?: string, exceptMaterialId?: string): boolean {
+    if (!url) return false;
+    return (
+      this.state.sessions.some((s) => s.id !== exceptSessionId && s.materials_url === url) ||
+      this.state.courseMaterials.some((m) => m.id !== exceptMaterialId && m.file_url === url)
+    );
+  }
+
+  // Round 17: delete a lesson for good. Supabase first: the lesson's exams
+  // (with questions/attempts), attendance, video plays and linked study
+  // materials go with it through ON DELETE CASCADE; payments/earnings/assignments
+  // just lose the link (SET NULL). If Supabase refuses, nothing is removed locally.
+  async deleteSession(sessionId: string): Promise<{ success: boolean; message: string }> {
+    const session = this.state.sessions.find((s) => s.id === sessionId);
+    if (!session) return { success: false, message: 'الحصة مش موجودة.' };
+    if (isUuid(sessionId)) {
+      try {
+        const { error } = await supabaseAdmin.from('sessions').delete().eq('id', syncId(sessionId));
+        if (error) {
+          return { success: false, message: `تعذر حذف الحصة من Supabase: ${error.message}` };
+        }
+      } catch (err: any) {
+        return { success: false, message: `تعذر الاتصال بـ Supabase: ${err?.message || err}` };
+      }
+    }
+    const examIds = new Set(this.state.exams.filter((e) => e.session_id === sessionId).map((e) => e.id));
+    const linkedMats = this.state.courseMaterials.filter((m) => m.session_id === sessionId);
+    this.state.sessions = this.state.sessions.filter((s) => s.id !== sessionId);
+    this.state.exams = this.state.exams.filter((e) => !examIds.has(e.id));
+    this.state.examAttempts = this.state.examAttempts.filter((a) => !examIds.has(a.exam_id));
+    this.state.attendance = this.state.attendance.filter((a: any) => a.session_id !== sessionId);
+    this.state.videoPlays = this.state.videoPlays.filter((v: any) => v.session_id !== sessionId);
+    this.state.courseMaterials = this.state.courseMaterials.filter((m) => m.session_id !== sessionId);
+    const unlink = (list: any[]) => list.forEach((x) => { if (x.session_id === sessionId) x.session_id = undefined; });
+    unlink(this.state.assignments);
+    unlink(this.state.studentPayments);
+    unlink(this.state.teacherEarnings);
+    this.state.notifications = this.state.notifications.filter(
+      (n: any) =>
+        n.related_url !== `/sessions/${sessionId}` && !(n.related_url && examIds.has(String(n.related_url).replace('/exams/', '')))
+    );
+    this.persist();
+
+    // Uploaded files: only remove them from Storage when nothing else uses the same file.
+    let fileNote = '';
+    const urls = [session.materials_url, ...linkedMats.map((m) => m.file_url)].filter(Boolean) as string[];
+    for (const url of Array.from(new Set(urls))) {
+      if (this.fileUrlStillUsed(url)) continue;
+      const r = await deleteMaterialFileFromSupabase(url);
+      if (!r.ok) fileNote = ' (الملف المرفوع فضل في Storage، امسحه يدوي لو عايز)';
+    }
+    return { success: true, message: `تم حذف الحصة "${session.title}" نهائياً من Supabase، ومش هتظهر للطلاب.${fileNote}` };
+  }
+
+  // Round 17: delete a study material (مذكرة). Supabase row first (its RAG
+  // chunks go with it), then the uploaded file if nobody else uses it.
+  async deleteCourseMaterial(materialId: string): Promise<{ success: boolean; message: string }> {
+    const mat = this.state.courseMaterials.find((m) => m.id === materialId);
+    if (!mat) return { success: false, message: 'المذكرة مش موجودة.' };
+    if (isUuid(materialId)) {
+      try {
+        const { error } = await supabaseAdmin.from('course_materials').delete().eq('id', syncId(materialId));
+        if (error) {
+          return { success: false, message: `تعذر حذف المذكرة من Supabase: ${error.message}` };
+        }
+      } catch (err: any) {
+        return { success: false, message: `تعذر الاتصال بـ Supabase: ${err?.message || err}` };
+      }
+    }
+    this.state.courseMaterials = this.state.courseMaterials.filter((m) => m.id !== materialId);
+    this.persist();
+    let fileNote = '';
+    if (!this.fileUrlStillUsed(mat.file_url)) {
+      const r = await deleteMaterialFileFromSupabase(mat.file_url);
+      if (!r.ok) fileNote = ' (الملف المرفوع فضل في Storage، امسحه يدوي لو عايز)';
+    }
+    return { success: true, message: `تم حذف المذكرة "${mat.title}" نهائياً، ومش هتظهر للطلاب.${fileNote}` };
   }
 
   // Register the attempt start on the server (n8n Exams Hub). Returns the

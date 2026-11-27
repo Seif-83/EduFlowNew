@@ -16,6 +16,15 @@ import {
 } from 'lucide-react';
 import { Profile, CourseGroup, Session, Exam } from '../../types/database';
 import { db } from '../../services/mockDatabase';
+import {
+  ManualQuestionsEditor,
+  ManualQuestionDraft,
+  emptyManualQuestion,
+  buildManualQuestions,
+} from '../common/ManualQuestionsEditor';
+import { uploadMaterialFileToSupabase } from '../../services/supabaseClient';
+
+const MAX_LESSON_FILE_MB = 25;
 
 interface FloatingTeacherStudiosProps {
   currentTeacher: Profile;
@@ -38,7 +47,17 @@ export const FloatingTeacherStudios: React.FC<FloatingTeacherStudiosProps> = ({
   // Active group
   const currentGroup = groups.find((g) => g.id === selectedGroupId) || groups[0];
   const sessions = db.getSessions(selectedGroupId);
-  const exams = db.getExams();
+  // Exam bank: this teacher's exams (sessions of their groups) plus orphans
+  // that belong to no group at all (so they can still be deleted).
+  const [, bumpBank] = useState(0);
+  const allSessionsList = db.getSessions();
+  const ownSessionIds = new Set(
+    groups.flatMap((g) => allSessionsList.filter((s) => s.group_id === g.id).map((s) => s.id))
+  );
+  const knownSessionIds = new Set(allSessionsList.map((s) => s.id));
+  const exams = db
+    .getExams()
+    .filter((ex) => ownSessionIds.has(ex.session_id) || !knownSessionIds.has(ex.session_id));
 
   // Session Studio Form State
   const [sessionActiveTab, setSessionActiveTab] = useState<'create' | 'list'>('create');
@@ -46,6 +65,10 @@ export const FloatingTeacherStudios: React.FC<FloatingTeacherStudiosProps> = ({
   const [sessionDesc, setSessionDesc] = useState('');
   const [sessionNumber, setSessionNumber] = useState(sessions.length + 1);
   const [sessionVideoUrl, setSessionVideoUrl] = useState('');
+  const [sessionFile, setSessionFile] = useState<File | null>(null);
+  const [sessionFileKey, setSessionFileKey] = useState(0);
+  const [sessionUploading, setSessionUploading] = useState(false);
+  const [sessionError, setSessionError] = useState('');
   const [sessionSuccessMsg, setSessionSuccessMsg] = useState('');
 
   // Exam Studio Form State
@@ -57,30 +80,56 @@ export const FloatingTeacherStudios: React.FC<FloatingTeacherStudiosProps> = ({
   const [examPassing, setExamPassing] = useState(70);
   const [examSubject, setExamSubject] = useState('العلوم والفيزياء (Sciences)');
   const [examTopicPrompt, setExamTopicPrompt] = useState('التركيب الذري والجدول الدوري الحديث');
-  const [manualQText, setManualQText] = useState('');
-  const [manualOptA, setManualOptA] = useState('');
-  const [manualOptB, setManualOptB] = useState('');
-  const [manualOptC, setManualOptC] = useState('');
-  const [manualOptD, setManualOptD] = useState('');
-  const [manualCorrect, setManualCorrect] = useState('');
-  const [manualExpl, setManualExpl] = useState('');
+  const [manualQuestions, setManualQuestions] = useState<ManualQuestionDraft[]>(() => [emptyManualQuestion()]);
+  const [examError, setExamError] = useState('');
+  const [examSessionId, setExamSessionId] = useState('');
+  const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [bankMsg, setBankMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [examPdfUrl, setExamPdfUrl] = useState('');
   const [examSuccessMsg, setExamSuccessMsg] = useState('');
 
   // Create Session Handler
-  const handleAddSession = (e: React.FormEvent) => {
+  const handleAddSession = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSessionError('');
     if (!sessionTitle.trim()) return;
+    if (sessionUploading) return;
+
+    const videoUrl = sessionVideoUrl.trim();
+    if (!videoUrl && !sessionFile) {
+      setSessionError('أضف رابط فيديو أو ارفع ملف (PDF أو غيره) للحصة.');
+      return;
+    }
+
+    // Upload the file to the same Supabase Storage bucket used for study materials.
+    let materialsUrl: string | undefined;
+    if (sessionFile) {
+      if (sessionFile.size > MAX_LESSON_FILE_MB * 1024 * 1024) {
+        setSessionError(`الملف أكبر من ${MAX_LESSON_FILE_MB} ميجا. صغّره أو حط لينك بدل الرفع.`);
+        return;
+      }
+      setSessionUploading(true);
+      const up = await uploadMaterialFileToSupabase(sessionFile, currentTeacher.id);
+      setSessionUploading(false);
+      if (!up.success || !up.url) {
+        setSessionError(
+          `فشل رفع الملف إلى Supabase Storage (${up.error || 'خطأ غير معروف'}). الحصة لم تُنشر، جرّب تاني.`
+        );
+        return;
+      }
+      materialsUrl = up.url;
+    }
 
     db.addSession({
       group_id: selectedGroupId,
       title: sessionTitle.trim(),
-      description: sessionDesc.trim() || 'شرح تفاعلي لموضوع الحصة وأهم النقاط الأساسية.',
+      description: sessionDesc.trim() || undefined,
       session_number: Number(sessionNumber),
-      video_url:
-        sessionVideoUrl.trim() ||
-        'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-      materials_url: 'https://example.com/materials.pdf',
+      video_url: videoUrl || undefined,
+      materials_url: materialsUrl,
       is_published: true,
     });
 
@@ -88,6 +137,8 @@ export const FloatingTeacherStudios: React.FC<FloatingTeacherStudiosProps> = ({
     setSessionTitle('');
     setSessionDesc('');
     setSessionVideoUrl('');
+    setSessionFile(null);
+    setSessionFileKey((k) => k + 1);
     setSessionNumber(db.getSessions(selectedGroupId).length + 1);
     setSessionActiveTab('list');
     onSessionCreated?.();
@@ -97,7 +148,18 @@ export const FloatingTeacherStudios: React.FC<FloatingTeacherStudiosProps> = ({
   // Create Exam Handler
   const handleAddExam = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!examTitle.trim()) return;
+    setExamError('');
+    if (!examTitle.trim()) {
+      setExamError('اكتب عنوان الاختبار الأول.');
+      return;
+    }
+
+    // The exam must hang on a lesson (sessions), otherwise Supabase has no row to attach it to.
+    const targetSessionId = sessions.find((s) => s.id === examSessionId)?.id || sessions[0]?.id || '';
+    if (!targetSessionId) {
+      setExamError('لازم تضيف حصة للمجموعة الأول عشان الاختبار يتحفظ على السيرفر.');
+      return;
+    }
 
     let questionsPayload = [
       {
@@ -126,26 +188,17 @@ export const FloatingTeacherStudios: React.FC<FloatingTeacherStudiosProps> = ({
       },
     ];
 
-    if (examMode === 'manual' && manualQText.trim()) {
-      questionsPayload = [
-        {
-          question_text: manualQText.trim(),
-          question_type: 'mcq' as const,
-          options: [
-            manualOptA.trim() || 'الاختيار أ',
-            manualOptB.trim() || 'الاختيار ب',
-            manualOptC.trim() || 'الاختيار ج',
-            manualOptD.trim() || 'الاختيار د',
-          ],
-          correct_answer: manualCorrect.trim() || manualOptA.trim() || 'الاختيار أ',
-          points: 1,
-          explanation: manualExpl.trim() || 'نموذج الإجابة المعتمد في الاختبار.',
-        },
-      ];
+    if (examMode === 'manual') {
+      const built = buildManualQuestions(manualQuestions);
+      if (built.error) {
+        setExamError(built.error);
+        return;
+      }
+      questionsPayload = built.questions as typeof questionsPayload;
     }
 
     const created = db.createExamWithQuestions({
-      session_id: sessions[0]?.id || '',
+      session_id: targetSessionId,
       title: examTitle.trim(),
       duration_minutes: Number(examDuration),
       passing_score: Number(examPassing),
@@ -165,16 +218,40 @@ export const FloatingTeacherStudios: React.FC<FloatingTeacherStudiosProps> = ({
 
     setExamSuccessMsg(`تم نشر الاختبار "${created.title}" وإضافته لبنك الأسئلة! 🎯`);
     setExamTitle('');
-    setManualQText('');
-    setManualOptA('');
-    setManualOptB('');
-    setManualOptC('');
-    setManualOptD('');
-    setManualCorrect('');
-    setManualExpl('');
+    setManualQuestions([emptyManualQuestion()]);
     setExamActiveTab('bank');
     onExamCreated?.();
     setTimeout(() => setExamSuccessMsg(''), 4500);
+  };
+
+  const handleDeleteSession = async (sessionId: string) => {
+    setDeletingSessionId(sessionId);
+    setSessionSuccessMsg('');
+    setSessionError('');
+    const res = await db.deleteSession(sessionId);
+    setDeletingSessionId(null);
+    setConfirmDeleteSessionId(null);
+    if (res.success) {
+      setSessionSuccessMsg(res.message);
+      bumpBank((n) => n + 1);
+      onSessionCreated?.();
+      onExamCreated?.();
+      setTimeout(() => setSessionSuccessMsg(''), 5000);
+    } else {
+      setSessionError(res.message);
+    }
+  };
+
+  const handleDeleteExam = async (examId: string) => {
+    setDeletingId(examId);
+    setBankMsg(null);
+    const res = await db.deleteExam(examId);
+    setDeletingId(null);
+    setConfirmDeleteId(null);
+    setBankMsg({ ok: res.success, text: res.message });
+    bumpBank((n) => n + 1);
+    if (res.success) onExamCreated?.();
+    setTimeout(() => setBankMsg(null), 5000);
   };
 
   return (
@@ -259,6 +336,13 @@ export const FloatingTeacherStudios: React.FC<FloatingTeacherStudiosProps> = ({
               </div>
             )}
 
+            {sessionActiveTab === 'list' && sessionError && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded-2xl flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{sessionError}</span>
+              </div>
+            )}
+
             {sessionActiveTab === 'create' ? (
               <form onSubmit={handleAddSession} className="space-y-3.5 text-right">
                 <div className="space-y-1">
@@ -304,7 +388,23 @@ export const FloatingTeacherStudios: React.FC<FloatingTeacherStudiosProps> = ({
                     placeholder="https://... (رابط الفيديو على Google Drive أو YouTube أو السيرفر)"
                     className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:bg-white focus:border-teal-600 outline-hidden"
                   />
-                  <p className="text-[11px] text-slate-400">إذا تُرك فارغاً سيتم استخدام فيديو تعليمي تجريبي تلقائياً.</p>
+                  <p className="text-[11px] text-slate-400">اختياري لو هترفع ملف تحت.</p>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700">أو ارفع ملف الحصة (PDF / صورة / Word / PowerPoint):</label>
+                  <input
+                    key={sessionFileKey}
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.zip,application/pdf,image/*"
+                    onChange={(e) => setSessionFile(e.target.files?.[0] || null)}
+                    className="w-full p-2 bg-slate-50 border border-dashed border-teal-300 rounded-xl text-xs font-semibold file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-teal-600 file:text-white file:font-bold file:text-xs file:cursor-pointer"
+                  />
+                  {sessionFile && (
+                    <p className="text-[11px] text-emerald-700 font-bold">
+                      تم اختيار: {sessionFile.name} ({(sessionFile.size / 1024 / 1024).toFixed(2)} ميجا) - هيتخزن في Supabase Storage ويظهر للطلاب.
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-1">
@@ -318,12 +418,20 @@ export const FloatingTeacherStudios: React.FC<FloatingTeacherStudiosProps> = ({
                   />
                 </div>
 
+                {sessionError && (
+                  <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-red-700 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{sessionError}</span>
+                  </div>
+                )}
+
                 <button
                   type="submit"
-                  className="w-full py-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs sm:text-sm transition-all shadow-md shadow-teal-600/20 flex items-center justify-center gap-2 cursor-pointer"
+                  disabled={sessionUploading}
+                  className="w-full py-3 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white font-bold text-xs sm:text-sm transition-all shadow-md shadow-teal-600/20 flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>اعتماد ونشر الحصة فوراً 🚀</span>
+                  <span>{sessionUploading ? 'جاري رفع الملف...' : 'اعتماد ونشر الحصة فوراً 🚀'}</span>
                 </button>
               </form>
             ) : (
@@ -342,8 +450,9 @@ export const FloatingTeacherStudios: React.FC<FloatingTeacherStudiosProps> = ({
                   sessions.map((s) => (
                     <div
                       key={s.id}
-                      className="p-3.5 rounded-2xl border border-slate-200 bg-white hover:border-teal-300 transition-all flex items-center justify-between gap-3 text-right"
+                      className="p-3.5 rounded-2xl border border-slate-200 bg-white hover:border-teal-300 transition-all text-right space-y-2"
                     >
+                      <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <div className="w-9 h-9 rounded-xl bg-teal-50 text-teal-700 font-black text-xs flex items-center justify-center shrink-0">
                           #{s.session_number}
@@ -353,9 +462,59 @@ export const FloatingTeacherStudios: React.FC<FloatingTeacherStudiosProps> = ({
                           <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">{s.description}</p>
                         </div>
                       </div>
-                      <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold px-2 py-0.5 rounded-md shrink-0">
-                        منشورة 🟢
-                      </span>
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold px-2 py-0.5 rounded-md">
+                          منشورة 🟢
+                        </span>
+                        {s.materials_url && (
+                          <a
+                            href={s.materials_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[10px] text-teal-700 font-bold flex items-center gap-1 hover:underline"
+                          >
+                            <FileText className="w-3 h-3" />
+                            <span>الملف المرفوع</span>
+                          </a>
+                        )}
+                      </div>
+                      </div>
+                      {confirmDeleteSessionId === s.id ? (
+                        <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 space-y-2">
+                          <p className="text-[11px] font-bold text-red-700">
+                            متأكد إنك عايز تمسح الحصة "{s.title}"؟ هتتمسح من Supabase ومعاها الاختبارات والحضور المرتبطين بيها والملف المرفوع، ومش هتظهر للطلاب تاني.
+                          </p>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              disabled={deletingSessionId === s.id}
+                              onClick={() => handleDeleteSession(s.id)}
+                              className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white text-[11px] font-bold cursor-pointer"
+                            >
+                              {deletingSessionId === s.id ? 'جاري الحذف...' : 'نعم، احذف الحصة'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={deletingSessionId === s.id}
+                              onClick={() => setConfirmDeleteSessionId(null)}
+                              className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-[11px] font-bold cursor-pointer"
+                            >
+                              إلغاء
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteSessionId(s.id)}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-[11px] font-bold cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>حذف الحصة</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))
                 )}
@@ -538,54 +697,46 @@ export const FloatingTeacherStudios: React.FC<FloatingTeacherStudiosProps> = ({
                 )}
 
                 {examMode === 'manual' && (
-                  <div className="space-y-2 p-3 bg-slate-50 border border-slate-200 rounded-2xl">
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-700">نص السؤال:</label>
-                      <input
-                        type="text"
-                        value={manualQText}
-                        onChange={(e) => setManualQText(e.target.value)}
-                        placeholder="اكتب نص السؤال بدقة..."
-                        className="w-full p-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <input
-                        type="text"
-                        value={manualOptA}
-                        onChange={(e) => setManualOptA(e.target.value)}
-                        placeholder="اختيار أ"
-                        className="p-2 bg-white border border-slate-200 rounded-xl text-xs"
-                      />
-                      <input
-                        type="text"
-                        value={manualOptB}
-                        onChange={(e) => setManualOptB(e.target.value)}
-                        placeholder="اختيار ب"
-                        className="p-2 bg-white border border-slate-200 rounded-xl text-xs"
-                      />
-                      <input
-                        type="text"
-                        value={manualOptC}
-                        onChange={(e) => setManualOptC(e.target.value)}
-                        placeholder="اختيار ج"
-                        className="p-2 bg-white border border-slate-200 rounded-xl text-xs"
-                      />
-                      <input
-                        type="text"
-                        value={manualOptD}
-                        onChange={(e) => setManualOptD(e.target.value)}
-                        placeholder="اختيار د"
-                        className="p-2 bg-white border border-slate-200 rounded-xl text-xs"
-                      />
-                    </div>
-                    <input
-                      type="text"
-                      value={manualCorrect}
-                      onChange={(e) => setManualCorrect(e.target.value)}
-                      placeholder="نص الإجابة الصحيحة المطابق تماماً لأحد الاختيارات"
-                      className="w-full p-2 bg-emerald-50/70 border border-emerald-300 rounded-xl text-xs font-bold text-emerald-900"
-                    />
+                  <ManualQuestionsEditor questions={manualQuestions} onChange={setManualQuestions} />
+                )}
+
+                {sessions.length === 0 ? (
+                  <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800">
+                    مفيش حصص في المجموعة دي لسه. أضف حصة الأول عشان الاختبار يتربط بيها ويتحفظ على Supabase.
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsExamStudioOpen(false);
+                        setSessionActiveTab('create');
+                        setIsSessionStudioOpen(true);
+                      }}
+                      className="mt-2 w-full py-2 rounded-xl bg-indigo-600 text-white text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer hover:bg-indigo-700"
+                    >
+                      <Plus className="w-4 h-4" />
+                      إضافة حصة (نشر حصة جديدة)
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">الحصة المرتبط بيها الاختبار:</label>
+                    <select
+                      value={sessions.find((s) => s.id === examSessionId)?.id || sessions[0].id}
+                      onChange={(e) => setExamSessionId(e.target.value)}
+                      className="w-full p-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold"
+                    >
+                      {sessions.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {examError && (
+                  <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-red-700 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{examError}</span>
                   </div>
                 )}
 
@@ -599,6 +750,17 @@ export const FloatingTeacherStudios: React.FC<FloatingTeacherStudiosProps> = ({
               </form>
             ) : (
               <div className="space-y-2.5">
+                {bankMsg && (
+                  <div
+                    className={`p-2.5 rounded-xl border text-xs font-bold ${
+                      bankMsg.ok
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                        : 'bg-red-50 border-red-200 text-red-700'
+                    }`}
+                  >
+                    {bankMsg.text}
+                  </div>
+                )}
                 {exams.length === 0 ? (
                   <div className="text-center py-8 px-4 rounded-2xl border-2 border-dashed border-purple-200 bg-purple-50/40">
                     <p className="text-xs font-bold text-slate-600">لا توجد اختبارات منشورة بعد</p>
@@ -615,9 +777,9 @@ export const FloatingTeacherStudios: React.FC<FloatingTeacherStudiosProps> = ({
                       key={ex.id}
                       className="p-3.5 rounded-2xl border border-slate-200 bg-white hover:border-purple-300 transition-all text-right space-y-1.5"
                     >
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-bold text-slate-900">{ex.title}</span>
-                        <span className="text-[10px] bg-purple-50 text-purple-700 border border-purple-200 font-bold px-2 py-0.5 rounded-md">
+                        <span className="text-[10px] bg-purple-50 text-purple-700 border border-purple-200 font-bold px-2 py-0.5 rounded-md shrink-0">
                           {ex.questions?.length || 0} أسئلة
                         </span>
                       </div>
@@ -626,6 +788,42 @@ export const FloatingTeacherStudios: React.FC<FloatingTeacherStudiosProps> = ({
                         <span>•</span>
                         <span>درجة النجاح: %{ex.passing_score}</span>
                       </div>
+                      {confirmDeleteId === ex.id ? (
+                        <div className="mt-1 p-2.5 rounded-xl bg-red-50 border border-red-200 space-y-2">
+                          <p className="text-[11px] font-bold text-red-700">
+                            متأكد إنك عايز تمسح "{ex.title}"؟ هيتمسح من Supabase ومعاه نتايج الطلاب فيه، ومش هيظهر للطلاب تاني.
+                          </p>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              disabled={deletingId === ex.id}
+                              onClick={() => handleDeleteExam(ex.id)}
+                              className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white text-[11px] font-bold cursor-pointer"
+                            >
+                              {deletingId === ex.id ? 'جاري الحذف...' : 'نعم، احذف'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={deletingId === ex.id}
+                              onClick={() => setConfirmDeleteId(null)}
+                              className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-[11px] font-bold cursor-pointer"
+                            >
+                              إلغاء
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(ex.id)}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-[11px] font-bold cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>حذف الاختبار</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))
                 )}

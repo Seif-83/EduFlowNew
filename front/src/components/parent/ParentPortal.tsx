@@ -340,7 +340,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ currentParent }) => 
                 <span className="bg-amber-500/20 text-amber-300 border border-amber-400/30 px-3 py-0.5 rounded-lg font-bold text-xs flex items-center gap-1.5">
                   <span>👨‍🏫 المعلم المشرف:</span>
                   <strong className="text-white">
-                    {activeChild.teacher_name || (activeChild.teacher_id === 'tea-2' ? 'د. مروة محمود (رياضيات)' : 'أ. أحمد رضوان (علوم)')}
+                    {activeChild.teacher_name || db.getProfiles().find((p) => p.id === activeChild.teacher_id)?.full_name || 'لم يتم تحديد معلم'}
                   </strong>
                 </span>
                 <span>•</span>

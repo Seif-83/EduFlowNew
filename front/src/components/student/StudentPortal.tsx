@@ -38,6 +38,18 @@ interface StudentPortalProps {
   onUpdateStudent: (student: Profile) => void;
 }
 
+// Label for a lesson's attached file: the original file name stored in the URL.
+function lessonFileLabel(url?: string): string {
+  if (!url) return 'ملف الحصة';
+  try {
+    const last = decodeURIComponent(url.split('?')[0].split('/').pop() || '');
+    const name = last.replace(/^\d{10,}-/, '');
+    return name ? `ملف الحصة: ${name}` : 'ملف الحصة';
+  } catch {
+    return 'ملف الحصة';
+  }
+}
+
 export const StudentPortal: React.FC<StudentPortalProps> = ({
   currentStudent,
   onUpdateStudent,
@@ -390,7 +402,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                 <span>•</span>
                 <span className="bg-blue-600/30 text-blue-200 border border-blue-500/40 px-3 py-0.5 rounded-lg font-bold text-xs flex items-center gap-1.5">
                   <span>👨‍🏫 المعلم المشرف:</span>
-                  <strong className="text-white">{currentStudent.teacher_name || (currentStudent.teacher_id === 'tea-2' ? 'د. مروة محمود (رياضيات)' : 'أ. أحمد رضوان (علوم)')}</strong>
+                  <strong className="text-white">{currentStudent.teacher_name || db.getProfiles().find((p) => p.id === currentStudent.teacher_id)?.full_name || 'لم يتم تحديد معلم'}</strong>
                 </span>
                 <span>•</span>
                 <span className="text-slate-300">
@@ -1092,6 +1104,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                     </div>
 
                     <div className="flex items-center gap-2 w-full sm:w-auto">
+                      {(sess.video_url || !sess.materials_url) && (
                       <button
                         onClick={() => handleLaunchVideo(sess)}
                         disabled={!info.locked && remaining === 0}
@@ -1100,6 +1113,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                         <Play className="w-4 h-4 fill-white" />
                         <span>{info.locked ? 'افتح الحصة' : 'مشاهدة الحصة'}</span>
                       </button>
+                      )}
 
                       {sess.materials_url && (
                         <a
@@ -1109,7 +1123,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
                           className="px-3 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 font-bold text-xs flex items-center gap-1 transition-colors"
                         >
                           <Download className="w-3.5 h-3.5" />
-                          <span>المذكرة PDF</span>
+                          <span>{lessonFileLabel(sess.materials_url)}</span>
                         </a>
                       )}
                     </div>

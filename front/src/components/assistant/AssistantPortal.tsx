@@ -1,3 +1,9 @@
+import {
+  ManualQuestionsEditor,
+  ManualQuestionDraft,
+  emptyManualQuestion,
+  buildManualQuestions,
+} from '../common/ManualQuestionsEditor';
 import React, { useState } from 'react';
 import {
   Laptop,
@@ -9,6 +15,7 @@ import {
   Plus,
   Search,
   CheckCircle,
+  Trash2,
   AlertCircle,
   Clock,
   Download,
@@ -74,7 +81,7 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
 
   // Groups and Sessions
   const groups = db.getGroups();
-  const [selectedGroupId, setSelectedGroupId] = useState<string>(groups[0]?.id || 'g-1');
+  const [selectedGroupId, setSelectedGroupId] = useState<string>(groups[0]?.id || '');
   const selectedGroup = groups.find((g: CourseGroup) => g.id === selectedGroupId) || groups[0];
   const groupSessions = db.getSessions(selectedGroupId);
   const [selectedSessionId, setSelectedSessionId] = useState<string>(groupSessions[0]?.id || '');
@@ -135,13 +142,12 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
   const [examDuration, setExamDuration] = useState(15);
   const [examPassing, setExamPassing] = useState(70);
   const [examTopicPrompt, setExamTopicPrompt] = useState('Atomic Structure & Chemical Bonding');
-  const [examManualQText, setExamManualQText] = useState('');
-  const [examManualOptA, setExamManualOptA] = useState('');
-  const [examManualOptB, setExamManualOptB] = useState('');
-  const [examManualOptC, setExamManualOptC] = useState('');
-  const [examManualOptD, setExamManualOptD] = useState('');
-  const [examManualCorrect, setExamManualCorrect] = useState('');
-  const [examManualExpl, setExamManualExpl] = useState('');
+  const [examManualQuestions, setExamManualQuestions] = useState<ManualQuestionDraft[]>(() => [emptyManualQuestion()]);
+  const [examFormError, setExamFormError] = useState('');
+  const [confirmDeleteExamId, setConfirmDeleteExamId] = useState<string | null>(null);
+  const [deleteExamBusy, setDeleteExamBusy] = useState(false);
+  const [examDeleteMsg, setExamDeleteMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [, bumpExams] = useState(0);
   const [examFileUrl, setExamFileUrl] = useState('');
   const [examSuccess, setExamSuccess] = useState('');
 
@@ -232,7 +238,15 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
 
   const handleCreateExamByAssistant = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!examTitle.trim()) return;
+    setExamFormError('');
+    if (!examTitle.trim()) {
+      setExamFormError('اكتب عنوان الاختبار.');
+      return;
+    }
+    if (!selectedSessionId) {
+      setExamFormError('لازم تختار حصة (أو تضيف حصة للمجموعة) عشان الاختبار يتحفظ على السيرفر.');
+      return;
+    }
 
     let questionsPayload = [
       {
@@ -261,22 +275,13 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
       },
     ];
 
-    if (examCreationMode === 'manual' && examManualQText.trim()) {
-      questionsPayload = [
-        {
-          question_text: examManualQText.trim(),
-          question_type: 'mcq' as const,
-          options: [
-            examManualOptA.trim() || 'Choice A',
-            examManualOptB.trim() || 'Choice B',
-            examManualOptC.trim() || 'Choice C',
-            examManualOptD.trim() || 'Choice D',
-          ],
-          correct_answer: examManualCorrect.trim() || examManualOptA.trim() || 'Choice A',
-          points: 1,
-          explanation: examManualExpl.trim() || 'نموذج الإجابة المعتمد في الاختبار.',
-        },
-      ];
+    if (examCreationMode === 'manual') {
+      const built = buildManualQuestions(examManualQuestions);
+      if (built.error) {
+        setExamFormError(built.error);
+        return;
+      }
+      questionsPayload = built.questions as typeof questionsPayload;
     }
 
     db.createExamWithQuestions({
@@ -296,14 +301,19 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
     setExamSuccess(`تم نشر الاختبار "${examTitle}" بنجاح وإشعار طلاب الحصة فوراً.`);
     setShowAddExamModal(false);
     setExamTitle('');
-    setExamManualQText('');
-    setExamManualOptA('');
-    setExamManualOptB('');
-    setExamManualOptC('');
-    setExamManualOptD('');
-    setExamManualCorrect('');
-    setExamManualExpl('');
+    setExamManualQuestions([emptyManualQuestion()]);
     setTimeout(() => setExamSuccess(''), 5000);
+  };
+
+  const handleDeleteExamByAssistant = async (examId: string) => {
+    setDeleteExamBusy(true);
+    setExamDeleteMsg(null);
+    const res = await db.deleteExam(examId);
+    setDeleteExamBusy(false);
+    setConfirmDeleteExamId(null);
+    setExamDeleteMsg({ ok: res.success, text: res.message });
+    bumpExams((n) => n + 1);
+    setTimeout(() => setExamDeleteMsg(null), 5000);
   };
 
   const handleSaveAttendance = () => {
@@ -894,6 +904,18 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
             </button>
           </div>
 
+          {examDeleteMsg && (
+            <div
+              className={`p-3 rounded-xl border text-xs font-bold ${
+                examDeleteMsg.ok
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                  : 'bg-red-50 border-red-200 text-red-700'
+              }`}
+            >
+              {examDeleteMsg.text}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {allExams.map((ex: Exam) => (
               <div
@@ -928,6 +950,42 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
                     <span>متاح للطلاب</span>
                   </span>
                 </div>
+                {confirmDeleteExamId === ex.id ? (
+                  <div className="mt-3 p-2.5 rounded-xl bg-red-50 border border-red-200 space-y-2">
+                    <p className="text-[11px] font-bold text-red-700">
+                      متأكد إنك عايز تمسح "{ex.title}"؟ هيتمسح من Supabase ومعاه نتايج الطلاب فيه.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={deleteExamBusy}
+                        onClick={() => handleDeleteExamByAssistant(ex.id)}
+                        className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white text-[11px] font-bold cursor-pointer"
+                      >
+                        {deleteExamBusy ? 'جاري الحذف...' : 'نعم، احذف'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={deleteExamBusy}
+                        onClick={() => setConfirmDeleteExamId(null)}
+                        className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-[11px] font-bold cursor-pointer"
+                      >
+                        إلغاء
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteExamId(ex.id)}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-[11px] font-bold cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>حذف الاختبار</span>
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -1650,60 +1708,7 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
               )}
 
               {examCreationMode === 'manual' && (
-                <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
-                  <span className="font-bold text-slate-900 block">إدخال السؤال يدوياً:</span>
-                  <input
-                    type="text"
-                    placeholder="نص السؤال..."
-                    value={examManualQText}
-                    onChange={(e) => setExamManualQText(e.target.value)}
-                    className="w-full px-3 py-2 bg-white rounded-xl border border-slate-300 text-xs"
-                  />
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <input
-                      type="text"
-                      placeholder="خيار أ"
-                      value={examManualOptA}
-                      onChange={(e) => setExamManualOptA(e.target.value)}
-                      className="px-2 py-1.5 bg-white rounded-lg border text-xs"
-                    />
-                    <input
-                      type="text"
-                      placeholder="خيار ب"
-                      value={examManualOptB}
-                      onChange={(e) => setExamManualOptB(e.target.value)}
-                      className="px-2 py-1.5 bg-white rounded-lg border text-xs"
-                    />
-                    <input
-                      type="text"
-                      placeholder="خيار ج"
-                      value={examManualOptC}
-                      onChange={(e) => setExamManualOptC(e.target.value)}
-                      className="px-2 py-1.5 bg-white rounded-lg border text-xs"
-                    />
-                    <input
-                      type="text"
-                      placeholder="خيار د"
-                      value={examManualOptD}
-                      onChange={(e) => setExamManualOptD(e.target.value)}
-                      className="px-2 py-1.5 bg-white rounded-lg border text-xs"
-                    />
-                  </div>
-                  <input
-                    type="text"
-                    placeholder="الإجابة الصحيحة بالضبط (مطابقة لأحد الخيارات)..."
-                    value={examManualCorrect}
-                    onChange={(e) => setExamManualCorrect(e.target.value)}
-                    className="w-full px-3 py-1.5 bg-white rounded-xl border border-slate-300 text-xs"
-                  />
-                  <input
-                    type="text"
-                    placeholder="تفسير الإجابة وشرح الحل..."
-                    value={examManualExpl}
-                    onChange={(e) => setExamManualExpl(e.target.value)}
-                    className="w-full px-3 py-1.5 bg-white rounded-xl border border-slate-300 text-xs"
-                  />
-                </div>
+                <ManualQuestionsEditor questions={examManualQuestions} onChange={setExamManualQuestions} />
               )}
 
               {examCreationMode === 'upload' && (
@@ -1716,6 +1721,12 @@ export const AssistantPortal: React.FC<AssistantPortalProps> = ({ currentAssista
                     onChange={(e) => setExamFileUrl(e.target.value)}
                     className="w-full px-3 py-2 bg-white rounded-xl border border-slate-300 text-xs"
                   />
+                </div>
+              )}
+
+              {examFormError && (
+                <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-red-700">
+                  {examFormError}
                 </div>
               )}
 
